@@ -2,8 +2,9 @@
 
 A small CesiumJS + Vite app for developing two custom `Cesium.Material`s:
 
-- **PolylinePatternMaterial** repeats an image stamp along a polyline. The test stamp is a line
-  with an "X" on it (`public/patterns/x-stamp.svg`).
+- **PolylinePatternMaterial** draws a patterned line with optional symbols on top. It takes two
+  optional images: a **line image**, one seamless period of the line (solid, dashed, wave,
+  sawtooth …), and a **stamp image**, a symbol such as an "X" or an arrow.
 - **PolygonPatternMaterial** fills a polygon with a repeating image tile. The test tile is a
   seamless 45° hatch (`public/patterns/hatch-45.svg`).
 
@@ -26,8 +27,10 @@ Cesium and no terrain, so the ground is the WGS84 ellipsoid.
 - Click **Draw Polyline** or **Draw Polygon**, then click to place vertices.
 - Double-click or right-click to finish the shape.
 - Drag the white handles to edit; the pattern updates live.
-- The **Line width** and **Stamp spacing** sliders and the **At vertices** combobox change every
-  polyline live.
+- These controls change every polyline live:
+  - the **Line width** and **Stamp spacing** sliders;
+  - the **Line image** and **Stamp image** comboboxes, where "None" removes that layer;
+  - the **Stamps at vertices** combobox.
 - The toolbar shows the current camera height.
 - To share an exact view, run `app.exportState()` in the browser console; it copies the shapes,
   camera, sliders and shader as JSON. `app.importState(json)` recreates that view.
@@ -50,7 +53,9 @@ src/solutions/worldSpace/
 src/shared/
   mipmapTexture.js                       Adds mipmaps and a sampler to a material's image texture
   testPatterns.js                        Test images, colors, line width and tile size
-public/patterns/                         x-stamp.svg (256x128), hatch-45.svg (256x256)
+public/patterns/                         Line images: line-solid/-dashed/-wave/-sawtooth.svg
+                                         Stamp images: x-symbol.svg, arrow-symbol.svg (256x128)
+                                         Polygon tile: hatch-45.svg (256x256)
 vite.config.js                           Copies Cesium's static assets (official cesium-vite setup)
 ```
 
@@ -109,92 +114,88 @@ never slides relative to the ground.
 **Distance along the line.** `d = st.s * lineLength` gives meters along the line. `lineLength`
 is the geodesic length from `EllipsoidGeodesic`, which matches what Cesium normalizes `st.s` by.
 
-**The image is one stamp.** It's drawn undistorted and as tall as the line is wide, so its
-on-screen length is:
+**Two optional layers.**
 
+```js
+PolylinePatternMaterial.create({
+  lineImage,          // one seamless period of the line; null = no line
+  stampImage,         // a symbol on a transparent background; null = no stamps
+  lineColor, stampColor,
+  spacing: 1,         // stamp repeat as a multiple of the stamp length (0.25-4)
+  vertexMode: PolylinePatternMaterial.VertexMode.CLIP,
+});
+PolylinePatternMaterial.setImages(material, { lineImage, stampImage });   // change later
 ```
-stamp length = line width × image width / image height
-```
 
-The shader works this out itself. It reads the line width from Cesium's `v_width` varying
-(which `GroundPolylinePrimitive` provides when the material declares it) and the aspect ratio
-from `textureSize(image, 0)`, so there's nothing to configure and no way to distort the
-symbol. The image's resolution only affects sharpness, not size.
+Splitting the line and the symbol solves a conflict. The continuous line must stop exactly at
+the geometry, while a symbol must keep one orientation even where it reaches past a corner.
+With a single image, those two needs fought each other at every vertex.
 
-**Spacing.** There are two ways to space stamps further apart:
-- pad the image, for example with plain line on both sides of the symbol, so one repeat
-  already includes its gap;
-- raise the optional `spacing` multiplier (`create({ spacing })` or
-  `material.uniforms.spacing`). Stamps then repeat every `stamp length × spacing`, and the
-  extra room is filled with the image's edge column, so the symbol itself is never stretched.
+**Size: each image is as tall as the line is wide.** Both images keep their aspect ratio, so one
+image covers `line width × image width / image height` pixels along the line. The shader works
+this out from Cesium's `v_width` varying (which `GroundPolylinePrimitive` provides when the
+material declares it) and from `textureSize`. Nothing else configures size, so a symbol can't be
+distorted, and an image's resolution only affects its sharpness.
 
-`spacing` can also go **below 1**, down to 0.25, to pack stamps closer than their own length.
-Overlapping stamps can then cover the same pixel. Each pixel draws its nearest stamp, then
-layers any neighboring stamps (up to two on each side) that also cover it on top, using normal
-alpha "over" compositing. At 1× and above no neighbor ever covers a pixel, so this costs nothing
-visible there.
+`metersPerPixel` comes from `czm_metersPerPixel(eyeCoordinate)`. It gives meters per CSS pixel
+(it already includes the pixel ratio), which is the same unit as `v_width`. The eye coordinate
+is rebuilt from Cesium's globe depth texture, which is how `GroundPolylinePrimitive` sizes its
+own width. Screen-space derivatives of `d` are avoided: `d` comes from depth, and differencing
+neighboring pixels amplifies the noise. As a result:
+- seen top-down, sizes are exact at any zoom;
+- when the camera tilts, everything foreshortens with the draped line, like paint on the ground.
 
-The demo's **Stamp spacing** slider is logarithmic, 0.25×–4× with 1× in the middle.
+**Line layer.** The line image is repeated along each segment, fitted so the segment holds a
+power-of-two number of whole periods. The pattern therefore starts and ends on a period boundary
+at every vertex: dashes, waves and teeth are never cut mid-shape. The pattern stays anchored to
+the ground. As you zoom, the period stretches 1×–2×, and just before the count doubles the two
+counts cross-fade briefly. The image must be seamless, with matching left and right edges, and
+the shader samples it with `fract(phase)` and a REPEAT sampler.
 
-**Stamp size on screen.** `metersPerPixel` comes from `czm_metersPerPixel(eyeCoordinate)`,
-which gives meters per CSS pixel; it already includes the pixel ratio, the same units as
-`v_width`. The eye coordinate is rebuilt from Cesium's globe depth texture, which is how
-`GroundPolylinePrimitive` sizes its own width. As a result:
-- Top-down, a stamp is exactly `stamp length × line width` pixels at any zoom.
-- When the camera tilts, the stamp foreshortens together with the draped line, like paint on
-  the ground.
+In the mitered wedge outside a corner, Cesium clamps `st.s` to the vertex. The wedge therefore
+shows the image's edge column: the profile the line arrives with, extended until the two
+segments' profiles meet at the miter. For a solid line that's a clean miter join, and for a
+wave or sawtooth it's the miter of its edge profile.
 
-Screen-space derivatives of `d` would be the more obvious way to get pixel size. They're
-avoided because `d` is reconstructed from depth, and differencing neighboring pixels amplifies
-the depth noise.
+**Stamp layer.** Stamps are drawn on top at a near-constant pixel size, anchored to the line.
+The spacing level comes from the repeat length, `stamp length × spacing`, so stamps sit 1–2
+repeat lengths apart. Odd-indexed stamps fade out as the level approaches the next power of two.
 
-**Placing the stamp image.** The spacing level is chosen from the repeat length
-(`stamp length × spacing`), so stamps sit 1–2 repeat lengths apart. For each fragment the shader:
-1. finds the nearest stamp center: `index = floor(d / stampSpacing + 0.5)`;
-2. converts the offset from that center to pixels and maps it to the image's u coordinate:
-   `u = 0.5 + offsetPixels / stampPixels`, with `v = st.t`;
-3. lets the gaps between stamps sample the image's edge column, using a `CLAMP_TO_EDGE` sampler.
-   For a "line with a symbol" stamp that edge column is the plain line, so the line stays
-   continuous between X's while only the X's are spaced out.
+- **`spacing`** defaults to 1 (stamps touching). Above 1 it shows more of the line between
+  stamps. Below 1, down to 0.25, stamps overlap, so each pixel layers its nearest stamp plus up
+  to two neighbors on each side (alpha "over" compositing).
+- **Each stamp belongs to the segment containing its centre** and is drawn in that segment's
+  direction, even where it reaches past a vertex.
+- **Overflow past a vertex.** Near an interior vertex, each pixel also draws the stamps of the
+  other segment meeting there. It measures its position in that segment's frame, using per-vertex
+  frames: eye-space position, incoming and outgoing direction, and up. The CPU computes these in
+  double precision and uploads them every frame as a small float texture. Pixels in the corner
+  wedge draw both segments' stamps this way, because their `st.s` is clamped. A stamp on a corner
+  is therefore whole and has a single orientation, never torn. It's only visible inside the
+  line's footprint (the draped bands plus the wedges), so symbols should be no taller than the
+  line width.
+- **The wedge** is detected by `st.s` not changing between neighboring pixels. When zoomed in
+  close, it's detected by the pixel falling outside its segment.
 
-**Fade.** Odd-indexed stamps get `1 - smoothstep(0.5, 1.0, fraction toward the next level)`, as
-described above.
-
-**Vertices and corners.** A stamp drawn across a vertex is torn in two, because the line changes
-direction there. In the mitered wedge on the outside of a corner, Cesium clamps `st.s` to the
-vertex, so every wedge pixel reads the same image column and smears it into a stray bracket. The
-wedge is therefore always drawn with the plain edge column. It's detected by `st.s` not changing
-between neighboring pixels, or, zoomed in close, by the pixel falling outside its segment.
-
-What happens near vertices is a material option, `vertexMode`, set with
-`PolylinePatternMaterial.VertexMode`. The demo's **At vertices** combobox switches it live:
+**Stamps at vertices** (`vertexMode`, `PolylinePatternMaterial.VertexMode`; the demo's
+**Stamps at vertices** combobox):
 
 | mode | behaviour | trade-off |
 |---|---|---|
-| `SKIP` (default) | Stamps stay on the global grid; any stamp that would overlap a vertex or line end is left out. | The gap at a vertex depends on where the grid falls, up to about one spacing. |
-| `CLIP` | Stamps run right up to the vertex and are cut off there: a pixel only draws stamps centred in its own segment. | A partial stamp, e.g. half an X, can sit at a corner or end. |
-| `SNAP` | Stamps sit at the evenly divided points `i / n` of each segment, with `n` a power of two so zoom levels nest without popping. | The gap at a vertex equals the interior spacing, so it's regular but not tighter. |
-| `FIT` | Per segment, the first and last stamp touch the vertices, with the rest evenly spaced. | Stamps shift slightly while zooming, because their ground length changes with zoom. |
-| `CORNER` | `SKIP`, plus the stamp's symbol (without its own line) drawn centred on every interior vertex, aligned with the corner's mean direction. | Needs per-frame corner data. On a 90° corner the X's arms run close to the lines. |
+| `SKIP` | Global grid. Stamps that would reach past a vertex or line end are left out. | The gap at a vertex depends on where the grid falls. |
+| `CLIP` (default) | Global grid. Stamps near a vertex are kept and reach past it (drawn whole by the overflow pass), except at the line's two ends, where nothing exists beyond to draw on. | A stamp may sit over a corner, pointing along its own segment. |
+| `SNAP` | Stamps at the evenly divided points `i / n` of each segment, with `n` a power of two so zoom levels nest. | The gap at a vertex equals the interior spacing. |
+| `FIT` | Per segment, the first and last stamp touch the vertices. | Stamps shift slightly while zooming, because their ground length changes with zoom. |
+| `CORNER` | `SKIP`, plus one stamp centred on each interior vertex along the corner's mean direction. | On a 90° corner an X looks rotated 45°. |
 
-All modes run through one stamp loop: the nearest stamp plus up to two neighbors on each side,
-which also handles overlapping spacings below 1. `SNAP` and `FIT` only change where the stamp
-centres are, per segment.
+Vertex distances come from a small float texture, searched with a binary search, so there's no
+vertex limit. Zoomed in close, the shader instead uses the reference points' segment ranges
+plus uniforms for the vertex nearest the camera, all in full precision.
 
-`CORNER` gets a frame for each vertex (position plus two ground axes, in eye coordinates) from a
-small float texture that the CPU refreshes every frame. When zoomed in close, it uses uniforms
-for the corner nearest the camera instead.
-
-- **Where the vertex distances come from:** a small float texture holding each vertex's
-  distance along the line, searched with a binary search in the shader, so there's no vertex
-  limit.
-- **Close zoom:** the reference points also carry their segment's end distances, in full
-  precision.
-
-**Mip level.** `u` jumps from stamp to stamp, which would break the GPU's automatic mip
-selection, so the shader samples with `textureLod` and an explicit level:
-`log2(imageWidth / (stampPixels × czm_pixelRatio))`, where the multiplication converts CSS
-pixels to device pixels.
+**Mip levels.** Stamp `u` jumps between stamps and the line phase wraps, which would break
+automatic mip selection. Both layers therefore use `textureLod` with an explicit level:
+`log2(imageWidth / (on-screen length × czm_pixelRatio))`, where multiplying by the pixel ratio
+converts CSS pixels to device pixels.
 
 **Close-zoom precision.** `st.s` is a float32 fraction of the whole line, so `d` only resolves
 to `lineLength × 2⁻²⁴`. That is 22 cm on a 3,600 km line, which is hundreds of pixels at 1 m
@@ -279,13 +280,16 @@ levels just fades the in-between lines.
   blends that black into stroke edges, so both shaders compute `rgb /= a` to remove the dark
   fringe.
 - **No flash while loading.**
-  - The renderer loads and decodes both images once at startup and gives every material the same
-    decoded `HTMLImageElement`.
-  - Until the real texture is bound, Material uses a 1×1 white placeholder. Both shaders
-    `discard` while `textureSize(image, 0).x <= 1`, so a new shape never flashes as a solid block.
+  - The renderer loads and decodes every image once at startup and gives each material the same
+    decoded `HTMLImageElement`s.
+  - Until the real texture is bound, Material uses a 1×1 white placeholder. The shaders treat a
+    1×1 texture as "no image": the polygon draws nothing, and the polyline skips that layer.
+    That's also how a `null` line or stamp image works. A new shape therefore never flashes as a
+    solid block.
 - **Per-frame updates.** The renderer's `scene.preRender` listener calls `updateCamera` on every
-  material. The polygon needs the camera frame and sphere; the polyline needs its reference
-  points.
+  material:
+  - the polygon needs the camera frame and sphere;
+  - the polyline needs its reference points and vertex frames.
 - **Dependency pin.** `package.json` overrides `@zip.js/zip.js` to 2.7.52, because newer
   versions break Cesium 1.122's imports when Vite pre-bundles dependencies.
 
@@ -358,7 +362,20 @@ Roughly in the order they came up. Each explains why the code looks the way it d
    solid. Fixed by decoding the images once and sharing them, and by discarding fragments while
    the placeholder is bound.
 
-10. **Testing pitfalls.**
+10. **Corners: from skipping, to five modes, to two images.** An X on a vertex was torn in two,
+    with the halves pointing along different segments, and the mitered wedge smeared one image
+    column into a bracket. The steps along the way:
+    - **Skip:** stamps across vertices were simply left out.
+    - **Vertex modes:** clip, snap, fit and corner were added as options. Clipping still tore the
+      X near the vertex, because the line's two segments split the corner diagonally.
+    - **Two images:** the root cause was that one image held both the line, which must stop at
+      the geometry, and the symbol, which must keep one orientation. So the line and the symbol
+      became separate images. The line is bounded per segment, and the symbol is drawn whole in
+      its own segment's frame, from per-vertex frames, wherever it reaches.
+    - **Rejected along the way:** stretching one copy of the line per segment, which distorts
+      with segment length; and subtracting a stamp's line to isolate its symbol.
+
+11. **Testing pitfalls.**
     - Headless Chrome's software renderer, SwiftShader, didn't show the precision bugs. Tests
       had to run on the real GPU (`--use-angle=d3d11`).
     - At 1 m the view covers only about a meter, so the test camera had to aim at the true
@@ -377,7 +394,12 @@ Roughly in the order they came up. Each explains why the code looks the way it d
   would be a different algorithm and a new dropdown entry.
 - **Terrain.** The polygon's sphere intersection assumes the ground is the ellipsoid. With
   terrain, the hatch would shift slightly with parallax over hills.
-- **Corners.** The polyline's close-zoom path follows the two segments nearest the camera.
+- **Line period.** A line image's period stretches 1×–2× as you zoom. Near a doubling, the two
+  period counts briefly cross-fade, so waves show a faint double image for a short zoom range.
+- **Symbol size.** Stamps (and the overflow past a vertex) only show inside the line's footprint,
+  so a symbol taller than the line width is clipped.
+- **Close zoom near several corners.** The close-zoom path follows the two segments, and the
+  vertex, nearest the camera.
 - **Private API.** `mipmapTexture.js` uses a private Cesium field.
 
 ## Adding a solution

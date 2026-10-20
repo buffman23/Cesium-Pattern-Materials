@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="128" viewBox="0 0 256 128">
+  <!-- Stamp image: a tall "X" (56 wide x 104 tall) centred on a transparent background. The
+       256 x 128 box makes one stamp 2x the line width long, so at spacing 1 the X's are one
+       stamp length apart. -->
+  <g stroke="#ffffff" stroke-width="14" stroke-linecap="round" fill="none">
+    <line x1="100" y1="12" x2="156" y2="116" />
+    <line x1="156" y1="12" x2="100" y2="116" />
+  </g>
+</svg>

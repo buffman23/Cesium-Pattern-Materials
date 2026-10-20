@@ -49,7 +49,19 @@ body,
   color: #bbb;
 }
 
+#toolbar .row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+#toolbar .row > div {
+  flex: 1;
+}
+
 #solutionSelect,
+#lineImage,
+#stampImage,
 #vertexMode {
   width: 100%;
   padding: 4px;

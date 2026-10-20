@@ -24,13 +24,33 @@
       </label>
       <!-- Logarithmic: value v gives a 2^v multiplier, so 0.25x..4x with 1x in the middle. -->
       <input id="stampSpacing" type="range" min="-2" max="2" step="0.01" />
-      <label for="vertexMode">At vertices</label>
+      <div class="row">
+        <div>
+          <label for="lineImage">Line image</label>
+          <select id="lineImage">
+            <option value="">None</option>
+            <option value="solid" selected>Solid</option>
+            <option value="dashed">Dashed</option>
+            <option value="wave">Wave</option>
+            <option value="sawtooth">Sawtooth</option>
+          </select>
+        </div>
+        <div>
+          <label for="stampImage">Stamp image</label>
+          <select id="stampImage">
+            <option value="">None</option>
+            <option value="x" selected>X</option>
+            <option value="arrow">Arrow</option>
+          </select>
+        </div>
+      </div>
+      <label for="vertexMode">Stamps at vertices</label>
       <select id="vertexMode">
-        <option value="0">Skip: no stamps across vertices</option>
-        <option value="1">Clip: stamps cut off at the vertex</option>
+        <option value="0">Skip: none across vertices</option>
+        <option value="1" selected>Clip: whole, reaching past the vertex</option>
         <option value="2">Snap: even divisions of each segment</option>
-        <option value="3">Fit: stamps touch each vertex</option>
-        <option value="4">Corner: symbol on every corner</option>
+        <option value="3">Fit: touch each vertex</option>
+        <option value="4">Corner: extra stamp on every corner</option>
       </select>
       <div id="hint">Pick a tool to start drawing.</div>
       <div id="cameraHeight"></div>

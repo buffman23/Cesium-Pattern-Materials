@@ -13,13 +13,17 @@ import {
 import PolylinePatternMaterial from "./PolylinePatternMaterial.js";
 import PolygonPatternMaterial from "./PolygonPatternMaterial.js";
 import {
+  DEFAULT_LINE_IMAGE,
+  DEFAULT_STAMP_IMAGE,
   HATCH_COLOR,
   HATCH_TILE_PIXELS,
   HATCH_URL,
   LINE_COLOR,
+  LINE_IMAGES,
   LINE_WIDTH,
+  STAMP_COLOR,
+  STAMP_IMAGES,
   STAMP_SPACING,
-  X_STAMP_URL,
 } from "../../shared/testPatterns.js";
 
 /**
@@ -35,8 +39,9 @@ export default async function createRenderer(viewer) {
   // synchronously (asynchronous: false), which keeps editing flicker free.
   // Load and decode the pattern images once; every shape's material shares them, so new shapes
   // don't each wait for their own image load.
-  const [stampImage, hatchImage] = await Promise.all([
-    loadImage(X_STAMP_URL),
+  const [lineImages, stampImages, hatchImage] = await Promise.all([
+    loadImages(LINE_IMAGES),
+    loadImages(STAMP_IMAGES),
     loadImage(HATCH_URL),
     GroundPrimitive.initializeTerrainHeights(),
   ]);
@@ -47,7 +52,11 @@ export default async function createRenderer(viewer) {
   const rendered = new Map();
   let lineWidth = LINE_WIDTH;
   let stampSpacing = STAMP_SPACING;
-  let vertexMode = PolylinePatternMaterial.VertexMode.SKIP;
+  let vertexMode = PolylinePatternMaterial.VertexMode.CLIP;
+  let lineImageKey = DEFAULT_LINE_IMAGE; // a key of LINE_IMAGES, or null for no line
+  let stampImageKey = DEFAULT_STAMP_IMAGE; // a key of STAMP_IMAGES, or null for no stamps
+  const lineImageFor = (key) => (key ? lineImages[key] : null);
+  const stampImageFor = (key) => (key ? stampImages[key] : null);
 
   function groundLine(positions, width, material, loop = false) {
     return primitives.add(
@@ -73,8 +82,10 @@ export default async function createRenderer(viewer) {
     if (!state) {
       state = {
         material: PolylinePatternMaterial.create({
-          image: stampImage,
-          color: LINE_COLOR,
+          lineImage: lineImageFor(lineImageKey),
+          stampImage: stampImageFor(stampImageKey),
+          lineColor: LINE_COLOR,
+          stampColor: STAMP_COLOR,
           spacing: stampSpacing,
           vertexMode,
         }),
@@ -182,6 +193,26 @@ export default async function createRenderer(viewer) {
         }
       }
     },
+    /**
+     * Sets the line and/or stamp image by key (see LINE_IMAGES / STAMP_IMAGES); null removes
+     * that layer, undefined leaves it unchanged.
+     */
+    setImages({ line, stamp } = {}) {
+      if (line !== undefined) {
+        lineImageKey = line;
+      }
+      if (stamp !== undefined) {
+        stampImageKey = stamp;
+      }
+      for (const state of rendered.values()) {
+        if (state.material) {
+          PolylinePatternMaterial.setImages(state.material, {
+            lineImage: lineImageFor(lineImageKey),
+            stampImage: stampImageFor(stampImageKey),
+          });
+        }
+      }
+    },
     /** Sets how stamps behave at vertices (a PolylinePatternMaterial.VertexMode value). */
     setVertexMode(mode) {
       vertexMode = mode;
@@ -199,6 +230,14 @@ export default async function createRenderer(viewer) {
       outlineMaterial.destroy();
     },
   };
+}
+
+/** Loads and decodes every image of a { key: url } map into { key: HTMLImageElement }. */
+async function loadImages(urls) {
+  const entries = await Promise.all(
+    Object.entries(urls).map(async ([key, url]) => [key, await loadImage(url)]),
+  );
+  return Object.fromEntries(entries);
 }
 
 async function loadImage(url) {

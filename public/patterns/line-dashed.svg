@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <!-- Line image: one dash and one gap. Each segment starts and ends on a period boundary, so
+       every segment starts with a dash. -->
+  <rect x="0" y="58" width="80" height="12" fill="#ffffff" />
+</svg>

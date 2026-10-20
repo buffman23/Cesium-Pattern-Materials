@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="128" viewBox="0 0 256 128">
+  <!-- Stamp image: an arrowhead pointing along the line's direction of travel (+x), with a dot on
+       one side. Being asymmetric both ways, it shows whether stamps keep their orientation
+       along and across the line - including where they reach past a vertex. -->
+  <polyline points="100,20 156,64 100,108" fill="none" stroke="#ffffff" stroke-width="14"
+            stroke-linecap="round" stroke-linejoin="round" />
+  <circle cx="80" cy="28" r="10" fill="#ffffff" />
+</svg>

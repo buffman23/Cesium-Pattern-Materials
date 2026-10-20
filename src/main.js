@@ -65,6 +65,7 @@ async function useSolution(id) {
   renderer.setLineWidth?.(lineWidth);
   renderer.setStampSpacing?.(stampSpacing);
   renderer.setVertexMode?.(vertexMode);
+  renderer.setImages?.({ line: lineImage, stamp: stampImage });
   // Re-render the existing shapes with the newly selected solution.
   for (const shape of drawTool.shapes) {
     if (shape.positions.length >= MIN_POINTS[shape.type]) {
@@ -139,6 +140,25 @@ function setVertexMode(value) {
 
 vertexModeSelect.addEventListener("change", () => setVertexMode(Number(vertexModeSelect.value)));
 
+// --- Line / stamp image comboboxes ("" = none) ----------------------------------------------
+const lineImageSelect = document.getElementById("lineImage");
+const stampImageSelect = document.getElementById("stampImage");
+let lineImage = lineImageSelect.value || null;
+let stampImage = stampImageSelect.value || null;
+
+function setImages({ line = lineImage, stamp = stampImage } = {}) {
+  lineImage = line;
+  stampImage = stamp;
+  lineImageSelect.value = line ?? "";
+  stampImageSelect.value = stamp ?? "";
+  renderer?.setImages?.({ line, stamp });
+}
+
+lineImageSelect.addEventListener("change", () => setImages({ line: lineImageSelect.value || null }));
+stampImageSelect.addEventListener("change", () =>
+  setImages({ stamp: stampImageSelect.value || null }),
+);
+
 let savedSolution;
 try {
   savedSolution = localStorage.getItem(STORAGE_KEY);
@@ -184,6 +204,8 @@ function exportState() {
     lineWidth,
     stampSpacing,
     vertexMode,
+    lineImage,
+    stampImage,
     canvas: [viewer.canvas.clientWidth, viewer.canvas.clientHeight],
     camera: {
       lon: CesiumMath.toDegrees(position.longitude),
@@ -227,6 +249,9 @@ async function importState(json) {
   }
   if (state.vertexMode !== undefined) {
     setVertexMode(state.vertexMode);
+  }
+  if (state.lineImage !== undefined || state.stampImage !== undefined) {
+    setImages({ line: state.lineImage, stamp: state.stampImage });
   }
   drawTool.clear();
   for (const shape of state.shapes ?? []) {

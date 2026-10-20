@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <!-- Line image: one tooth of a sawtooth wave (slow rise, sharp drop). The polyline continues
+       past each edge (clipped by the viewBox), so the stroke joins seamlessly between tiles. -->
+  <polyline points="-128,96 -32,32 0,96 96,32 128,96 224,32 256,96"
+            fill="none" stroke="#ffffff" stroke-width="12" stroke-linejoin="miter" />
+</svg>

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="128" viewBox="0 0 256 128">
+  <!-- Line image: one period of a sine-like wave. The path continues one period past each edge
+       (clipped by the viewBox), so the stroke joins seamlessly between tiles. -->
+  <path d="M -256 64 c 32 -44 96 -44 128 0 s 96 44 128 0 c 32 -44 96 -44 128 0 s 96 44 128 0
+           c 32 -44 96 -44 128 0 s 96 44 128 0"
+        fill="none" stroke="#ffffff" stroke-width="12" />
+</svg>
