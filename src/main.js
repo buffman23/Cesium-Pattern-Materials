@@ -44,26 +44,17 @@ viewer.camera.setView({
   destination: Cartesian3.fromDegrees(-104.99, 39.74, 15000),
 });
 
-// --- Solution selection --------------------------------------------------------------------
-const STORAGE_KEY = "cesium-shaders.solution";
-const select = document.getElementById("solutionSelect");
+// --- Solution (rendering implementation; there is one, so no picker) --------------------------
 const description = document.getElementById("solutionDescription");
-for (const solution of solutions) {
-  select.add(new Option(solution.label, solution.id));
-}
 
 let renderer; // undefined while a renderer is being created
+let solutionId;
 let switchId = 0;
 
 async function useSolution(id) {
   const solution = solutions.find((s) => s.id === id) ?? solutions[0];
-  select.value = solution.id;
+  solutionId = solution.id;
   description.textContent = solution.description;
-  try {
-    localStorage.setItem(STORAGE_KEY, solution.id);
-  } catch {
-    // Storage unavailable; the selection just won't be remembered.
-  }
 
   const thisSwitch = ++switchId;
   renderer?.destroy();
@@ -114,7 +105,6 @@ const drawTool = new DrawTool(viewer, {
 buttons.polyline.addEventListener("click", () => drawTool.start("polyline"));
 buttons.polygon.addEventListener("click", () => drawTool.start("polygon"));
 document.getElementById("btnClear").addEventListener("click", () => drawTool.clear());
-select.addEventListener("change", () => useSolution(select.value));
 
 // --- Line width slider ---------------------------------------------------------------------
 const lineWidthInput = document.getElementById("lineWidth");
@@ -168,13 +158,7 @@ stampImageSelect.addEventListener("change", () =>
   setImages({ stamp: stampImageSelect.value || null }),
 );
 
-let savedSolution;
-try {
-  savedSolution = localStorage.getItem(STORAGE_KEY);
-} catch {
-  savedSolution = undefined;
-}
-useSolution(savedSolution);
+useSolution();
 
 // --- Camera height readout ----------------------------------------------------------------
 const cameraHeight = document.getElementById("cameraHeight");
@@ -209,7 +193,7 @@ function exportState() {
   const camera = viewer.camera;
   const position = camera.positionCartographic;
   const state = {
-    solution: select.value,
+    solution: solutionId,
     lineWidth,
     stampSpacing,
     lineImage,
@@ -243,7 +227,7 @@ function exportState() {
 
 async function importState(json) {
   const state = typeof json === "string" ? JSON.parse(json) : json;
-  if (state.solution && state.solution !== select.value) {
+  if (state.solution && state.solution !== solutionId) {
     await useSolution(state.solution);
   }
   if (state.lineWidth) {

@@ -17,6 +17,11 @@ import {
   TextureWrap,
 } from "cesium";
 import mipmapTexture from "../../shared/mipmapTexture.js";
+import {
+  createZoomSettle,
+  referenceMetersPerPixel,
+  updateZoomSettle,
+} from "../../shared/zoomSettle.js";
 
 // Intended for GroundPolylinePrimitive, whose fragment shader provides st.s as arc length
 // along the whole line normalized to 0..1, and st.t as 0..1 across the line width.
@@ -62,6 +67,9 @@ uniform sampler2D stampImage;   // 1x1 placeholder = no stamps
 uniform vec4 lineColor;
 uniform vec4 stampColor;
 uniform float spacing;          // stamp repeat as a multiple of the stamp length (>= 0.25)
+// Zoom level shifts (log2 units) that keep the fades from resting half faded; see zoomSettle.
+uniform float lineShift;
+uniform float stampShift;
 uniform float lineLength;
 uniform float preciseMetersPerPixel;
 uniform vec4 referenceA;        // xyz: point on the line (eye coords), w: distance mod modulus
@@ -131,9 +139,9 @@ vec4 lineAt(float along, float t, float metersPerPixel)
     // A power-of-two period in meters (1x-2x natural), anchored at the line start: it depends
     // only on zoom, and each level's pattern nests in the next. Just before the period doubles
     // it is nearly 2x stretched; cross-fade to half the period there.
-    float level = log2(natural);
+    float level = log2(natural) + lineShift;
     float k = ceil(level);
-    float blend = smoothstep(0.8, 1.0, k - level);
+    float blend = smoothstep(0.8, 1.0, k - level);  // partly faded for fract(level) in 0..0.2
     float period = exp2(k);
     float phase = along / period;
     float lod = max(log2(imageSize.x * metersPerPixel / (period * czm_pixelRatio)), 0.0);
@@ -263,11 +271,11 @@ czm_material czm_getMaterial(czm_materialInput materialInput)
         vec2 stampSize = vec2(textureSize(stampImage, 0));
         float stampMeters = width * stampSize.x / stampSize.y;
         float repeatMeters = stampMeters * max(spacing, MIN_SPACING);
-        float level = log2(repeatMeters);                 // 2^level m == one repeat on screen
+        float level = log2(repeatMeters) + stampShift;    // 2^level m ~ one repeat on screen
         float k = ceil(level);
-        float gridSpacing = exp2(k);                      // 1x..2x the repeat length
-        // Every second stamp fades out over the last 10% of the level before the spacing doubles:
-        // short enough that half-faded "ghost" stamps are rarely seen, long enough not to pop.
+        float gridSpacing = exp2(k);                      // ~1x..2x the repeat length
+        // Every second stamp fades out over the last 10% of the level before the spacing doubles
+        // (fract(level) in 0.9..1): short, and the level shift moves a resting camera out of it.
         float fadeOut = smoothstep(0.9, 1.0, 1.0 - (k - level));
         // Explicit mip level (u jumps between stamps): one stamp spans this many device pixels.
         float lod = max(log2(stampSize.x * metersPerPixel / (stampMeters * czm_pixelRatio)), 0.0);
@@ -410,6 +418,8 @@ export default class PolylinePatternMaterial {
           lineColor,
           stampColor,
           spacing,
+          lineShift: 0,
+          stampShift: 0,
           lineLength: 1,
           preciseMetersPerPixel: 0,
           referenceA: new Cartesian4(),
@@ -440,6 +450,7 @@ export default class PolylinePatternMaterial {
     material.lineWidth = 1;
     material.lineAspect = imageAspect(lineImage);
     material.stampAspect = imageAspect(stampImage);
+    material.zoomSettle = createZoomSettle();
 
     // Data textures need the WebGL context, which Material only gets in update.
     const originalUpdate = material.update.bind(material);
@@ -549,25 +560,35 @@ export default class PolylinePatternMaterial {
   }
 
   /**
-   * Updates the camera-dependent uniforms (close-range reference points and the vertex frames),
-   * in double precision.
+   * Updates the camera-dependent uniforms (close-range reference points and the vertex frames,
+   * in double precision; the zoom fade level shifts). Call every frame: while the fades are
+   * settling after the camera height stops changing, it requests further frames itself.
    *
    * @param {Material} material
-   * @param {Camera} camera
+   * @param {Scene} scene
    */
-  static updateCamera(material, camera) {
+  static updateCamera(material, scene) {
+    const camera = scene.camera;
     const uniforms = material.uniforms;
+
+    // Pixels here are CSS pixels, like the shader's metersPerPixel.
+    const stampPixels = material.lineWidth * material.stampAspect * Math.max(uniforms.spacing, MIN_SPACING);
+    const linePixels = material.lineWidth * material.lineAspect;
+    const metersPerPixel = referenceMetersPerPixel(scene);
+    const shifts = updateZoomSettle(material.zoomSettle, scene, {
+      line: { level: Math.log2(linePixels * metersPerPixel), window: [0, 0.2] },
+      stamp: { level: Math.log2(stampPixels * metersPerPixel), window: [0.9, 1] },
+    });
+    uniforms.lineShift = shifts.line;
+    uniforms.stampShift = shifts.stamp;
+
     const step = uniforms.lineLength * 2 ** -24;
     uniforms.preciseMetersPerPixel = step * PRECISE_STEP_FRACTION;
-    // Stamp spacing is at most 2 repeat lengths and the line period at most 2 image lengths;
-    // keep the modulus a multiple of twice the larger so the stamp index parity
-    // (every-second-stamp fade) and the line phase are preserved. Pixels here are CSS pixels,
-    // like the shader's metersPerPixel.
-    const repeatPixels = material.lineWidth * Math.max(
-      material.stampAspect * Math.max(uniforms.spacing, MIN_SPACING),
-      material.lineAspect,
-    );
-    const maxSpacing = 2 * repeatPixels * uniforms.preciseMetersPerPixel;
+    // Stamp spacing is under 4 repeat lengths and the line period under 4 image lengths (2x,
+    // plus the level shift); keep the modulus a multiple of twice the larger so the stamp index
+    // parity (every-second-stamp fade) and the line phase are preserved.
+    const repeatPixels = Math.max(stampPixels, linePixels);
+    const maxSpacing = 4 * repeatPixels * uniforms.preciseMetersPerPixel;
     const modulus = 2 ** Math.ceil(Math.log2(Math.max(2 * maxSpacing, 1e-3)));
 
     // The two segments closest to the camera (two, so corners near the camera work).

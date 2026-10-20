@@ -29,13 +29,12 @@ Cesium and no terrain, so the ground is the WGS84 ellipsoid.
 - Drag the white handles to edit; the pattern updates live.
 - These controls change every polyline live:
   - the **Line width** and **Stamp spacing** sliders;
-  - the **Line image** and **Stamp image** comboboxes, where "None" removes that layer;
-  - the **Stamps at vertices** combobox.
+  - the **Line image** and **Stamp image** comboboxes, where "None" removes that layer.
 - The toolbar shows the current camera height.
 - To share an exact view, run `app.exportState()` in the browser console; it copies the shapes,
-  camera, sliders and shader as JSON. `app.importState(json)` recreates that view.
-- The **Shader** dropdown selects an implementation. New rendering algorithms are added as new
-  entries; see [Adding a solution](#adding-a-solution).
+  camera, sliders and images as JSON. `app.importState(json)` recreates that view.
+- There is one rendering implementation (solution), so there is no picker; see
+  [Adding a solution](#adding-a-solution).
 
 A step-by-step rebuild plan for the materials is in
 [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md).
@@ -43,15 +42,16 @@ A step-by-step rebuild plan for the materials is in
 ## Project layout
 
 ```
-index.html, src/main.js, src/style.css   Viewer, toolbar, shader dropdown, sliders, camera height, export/import
+index.html, src/main.js, src/style.css   Viewer, toolbar, sliders, image comboboxes, camera height, export/import
 src/tools/DrawTool.js                    Click-to-draw and drag-to-edit tool (renders nothing itself)
-src/solutions/index.js                   List of selectable implementations
+src/solutions/index.js                   List of implementations (the first one is used)
 src/solutions/worldSpace/
   renderer.js                            Builds the Cesium primitives for each drawn shape
   PolylinePatternMaterial.js             Polyline material: GLSL shader (GPU) + per-frame JS uniform updates (CPU)
   PolygonPatternMaterial.js              Polygon material: GLSL shader (GPU) + per-frame JS uniform updates (CPU)
 src/shared/
   mipmapTexture.js                       Adds mipmaps and a sampler to a material's image texture
+  zoomSettle.js                          Keeps zoom cross-fades from resting half faded
   testPatterns.js                        Test images, colors, line width and tile size
 public/patterns/                         Line images: line-solid/-dashed/-wave/-sawtooth.svg
                                          Stamp images: x-symbol.svg, arrow-symbol.svg (256x128)
@@ -251,9 +251,10 @@ only resolves to about 6 cm. The camera's east/north position is therefore split
 
 **Tile size and cross-fade.**
 - `metersPerPixel` comes from the distance along the ray: `czm_metersPerPixel(dir · t)`.
-- `level = log2(tileSize × metersPerPixel)`, then `k = floor(level)`.
-- The shader samples tiles of `2^k` and `2^(k+1)` meters and blends them by `level - k`, so the
-  tile is about `tileSize` pixels on screen at any zoom.
+- `level = log2(tileSize × metersPerPixel) + 0.5 + levelShift`, then `k = floor(level)`. The
+  tile of `2^k` meters is about 0.7×–1.4× `tileSize` pixels on screen at any zoom.
+- Over the last 20% of a level the shader cross-fades to the `2^(k+1)` tile, so nothing pops
+  when `k` changes. `levelShift` keeps a resting camera out of that window (see the trade-offs).
 - `textureGrad` with the smooth derivatives of `p` picks the right mip level, including
   anisotropy when the camera is tilted.
 
@@ -385,8 +386,15 @@ Roughly in the order they came up. Each explains why the code looks the way it d
 ## Known trade-offs
 
 - **Spacing range.** Spacing and tile size vary between 1× and 2× the target as you zoom.
-  During a level change you'll see half-faded X's, or thick and thin hatch lines together. This
-  is the price of being anchored to the ground and never popping.
+  While zooming through a level change you'll see half-faded X's, or thick and thin hatch lines
+  together. This is the price of being anchored to the ground and never popping. Each fade only
+  covers a short window of the zoom level, and once the camera height has stopped changing
+  (0.15 s), each material shifts its level slightly (`src/shared/zoomSettle.js`, at most about
+  a quarter level) so the screen centre leaves the window by its nearest edge, animated over a
+  fraction of a second. The shift is the same for every pixel, so the fade just moves: no seams.
+  The materials request the frames for this themselves from `updateCamera(material, scene)`.
+  In tilted views the levels change across the screen, so a fade band may remain away from the
+  centre.
 - **Tilted views.** The line, X's and hatch foreshorten when the camera is tilted, like paint on
   the ground. To keep the X's full size when tilted, you'd need a camera-facing line, which
   would be a different algorithm and a new dropdown entry.
@@ -406,4 +414,6 @@ Roughly in the order they came up. Each explains why the code looks the way it d
    `async`, and it returns `{ update(shape), remove(shape), destroy() }`. Each `shape` has
    `{ id, type: "polyline" | "polygon", positions, complete }`.
 2. Register the solution in `src/solutions/index.js` with an `id`, `label` and `description`.
-   It then appears in the Shader dropdown, and switching re-renders the existing shapes with it.
+   With more than one solution, add a picker back to the toolbar that calls
+   `useSolution(id)` in `src/main.js`; switching re-renders the existing shapes. Until then,
+   `app.useSolution(id)` in the console switches.

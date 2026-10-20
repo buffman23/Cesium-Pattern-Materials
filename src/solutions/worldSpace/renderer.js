@@ -135,7 +135,7 @@ export default async function createRenderer(viewer) {
 
   function buildPolyline(state) {
     PolylinePatternMaterial.setPositions(state.material, state.positions, lineWidth);
-    PolylinePatternMaterial.updateCamera(state.material, scene.camera);
+    PolylinePatternMaterial.updateCamera(state.material, scene);
     replace(state, "primitive", groundLine(state.positions, lineWidth, state.material));
   }
 
@@ -154,7 +154,7 @@ export default async function createRenderer(viewer) {
     state.shape = shape;
     const positions = shape.positions;
     PolygonPatternMaterial.setOrigin(state.polygonMaterial, positions);
-    PolygonPatternMaterial.updateCamera(state.polygonMaterial, scene.camera);
+    PolygonPatternMaterial.updateCamera(state.polygonMaterial, scene);
 
     replace(
       state,
@@ -183,6 +183,7 @@ export default async function createRenderer(viewer) {
 
   // The scene renders on demand (requestRenderMode). While any pattern image is still being
   // turned into a texture, keep requesting frames so it appears without moving the camera.
+  // (The materials request frames themselves while their zoom fades settle.)
   const removePostRender = scene.postRender.addEventListener(() => {
     for (const state of rendered.values()) {
       for (const material of [state.material, state.polygonMaterial]) {
@@ -194,14 +195,14 @@ export default async function createRenderer(viewer) {
     }
   });
 
-  // Both patterns need the current camera every frame (precision at close zoom).
+  // Both patterns need the current camera every frame (precision at close zoom, zoom fades).
   const removePreRender = scene.preRender.addEventListener(() => {
     for (const state of rendered.values()) {
       if (state.polygonMaterial) {
-        PolygonPatternMaterial.updateCamera(state.polygonMaterial, scene.camera);
+        PolygonPatternMaterial.updateCamera(state.polygonMaterial, scene);
       }
       if (state.material) {
-        PolylinePatternMaterial.updateCamera(state.material, scene.camera);
+        PolylinePatternMaterial.updateCamera(state.material, scene);
       }
     }
   });

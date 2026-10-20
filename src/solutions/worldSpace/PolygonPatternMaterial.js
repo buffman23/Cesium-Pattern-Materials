@@ -10,6 +10,11 @@ import {
   Transforms,
 } from "cesium";
 import mipmapTexture from "../../shared/mipmapTexture.js";
+import {
+  createZoomSettle,
+  referenceMetersPerPixel,
+  updateZoomSettle,
+} from "../../shared/zoomSettle.js";
 
 // Works with any primitive whose material input provides positionToEyeEC (GroundPrimitive,
 // Primitive + MaterialAppearance). Texture coordinates are not used at all: each fragment is
@@ -30,9 +35,9 @@ import mipmapTexture from "../../shared/mipmapTexture.js";
 // high part by the (power-of-two) tile size, which is exact in float.
 //
 // To stay visible at any zoom, the tile size is a power of two in meters picked per fragment
-// from the pixel size at that distance so a tile is ~tileSize pixels, and the two nearest
-// power-of-two scales are cross-faded. A seamless pattern whose 2x scale lines up with itself
-// (like the 45 degree hatch) blends smoothly.
+// from the pixel size at that distance so a tile is ~tileSize pixels, and just before it
+// doubles the two nearest power-of-two scales are cross-faded. A seamless pattern whose 2x
+// scale lines up with itself (like the 45 degree hatch) blends smoothly.
 const source = /* glsl */ `
 uniform sampler2D image;
 uniform vec4 color;
@@ -43,6 +48,7 @@ uniform float cameraHeight;     // camera height above the sphere (meters)
 uniform vec3 cameraUp;          // unit vector from the sphere center to the camera, local frame
 uniform vec2 cameraHigh;        // camera east/north = cameraHigh + cameraLow
 uniform vec2 cameraLow;
+uniform float levelShift;       // keeps the cross-fade from resting half faded; see zoomSettle
 
 czm_material czm_getMaterial(czm_materialInput materialInput)
 {
@@ -70,11 +76,13 @@ czm_material czm_getMaterial(czm_materialInput materialInput)
     float metersPerPixel = max(czm_metersPerPixel(vec4(directionEC * t, 1.0)), 1e-6);
 
     // czm_metersPerPixel is per CSS pixel (it already includes the pixel ratio), like tileSize.
-    float level = log2(tileSize * metersPerPixel);
+    // The +0.5 centres the tile on tileSize: size0 is ~0.7x..1.4x tileSize pixels. The two
+    // scales cross-fade over the last 20% of a level (fract(level) in 0.8..1).
+    float level = log2(tileSize * metersPerPixel) + 0.5 + levelShift;
     float k = floor(level);
-    float blend = level - k;
-    float size0 = exp2(k);          // tile is 0.5x..1x tileSize pixels
-    float size1 = size0 * 2.0;      // tile is 1x..2x tileSize pixels
+    float blend = smoothstep(0.8, 1.0, level - k);
+    float size0 = exp2(k);
+    float size1 = size0 * 2.0;
 
     vec2 uv0 = (mod(cameraHigh, size0) + p) / size0;
     vec2 uv1 = (mod(cameraHigh, size1) + p) / size1;
@@ -137,6 +145,7 @@ export default class PolygonPatternMaterial {
           cameraUp: new Cartesian3(0, 0, 1),
           cameraHigh: new Cartesian2(),
           cameraLow: new Cartesian2(),
+          levelShift: 0,
         },
         source,
       },
@@ -144,6 +153,7 @@ export default class PolygonPatternMaterial {
     });
     material.localToWorld = Matrix4.clone(Matrix4.IDENTITY);
     material.worldToLocal = Matrix4.clone(Matrix4.IDENTITY);
+    material.zoomSettle = createZoomSettle();
     return mipmapTexture(material, "image");
   }
 
@@ -171,11 +181,20 @@ export default class PolygonPatternMaterial {
    * that is where precision matters, and a sphere fit at the polygon's center would sit tens of
    * meters below the real surface far from the center, making the pattern lag the camera.
    *
+   * It also advances the zoom fade's level shift (see zoomSettle); while that is settling after
+   * the camera height stops changing, it requests further frames itself.
+   *
    * @param {Material} material
-   * @param {Camera} camera
+   * @param {Scene} scene
    */
-  static updateCamera(material, camera) {
+  static updateCamera(material, scene) {
+    const camera = scene.camera;
     const uniforms = material.uniforms;
+    const level = Math.log2(uniforms.tileSize * referenceMetersPerPixel(scene)) + 0.5;
+    uniforms.levelShift = updateZoomSettle(material.zoomSettle, scene, {
+      tile: { level, window: [0.8, 1] },
+    }).tile;
+
     Matrix4.multiply(camera.viewMatrix, material.localToWorld, scratchModelView);
     Matrix4.inverseTransformation(scratchModelView, scratchEyeToLocal);
     Matrix4.pack(scratchEyeToLocal, uniforms.eyeToLocal);
