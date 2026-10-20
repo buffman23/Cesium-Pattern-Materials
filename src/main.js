@@ -9,6 +9,7 @@ import {
 } from "cesium";
 import DrawTool, { MIN_POINTS } from "./tools/DrawTool.js";
 import solutions from "./solutions/index.js";
+import { sizeScale } from "./shared/maxHeight.js";
 import { LINE_WIDTH, STAMP_SPACING } from "./shared/testPatterns.js";
 
 // --- Viewer (offline imagery, no Ion token needed) -----------------------------------------
@@ -67,6 +68,7 @@ async function useSolution(id) {
   renderer = created;
   renderer.setLineWidth?.(lineWidth);
   renderer.setStampSpacing?.(stampSpacing);
+  renderer.setMaxHeight?.({ maxHeight, heightTransition });
   renderer.setImages?.({ line: lineImage, stamp: stampImage });
   // Re-render the existing shapes with the newly selected solution.
   for (const shape of drawTool.shapes) {
@@ -138,6 +140,74 @@ stampSpacingInput.addEventListener("input", () =>
   setStampSpacing(2 ** Number(stampSpacingInput.value)),
 );
 
+// --- Max height slider (two handles) ---------------------------------------------------------
+// Value v -> 10^v meters. Upper handle = max camera height (the far right end = off), lower
+// handle = where the transition below it starts. Each handle pushes the other along.
+const maxHeightLower = document.getElementById("maxHeightLower");
+const maxHeightUpper = document.getElementById("maxHeightUpper");
+const maxHeightValue = document.getElementById("maxHeightValue");
+const MAX_HEIGHT_OFF = Number(maxHeightUpper.max);
+let maxHeight = Infinity;
+let heightTransition = 0;
+
+function applyMaxHeight() {
+  const off = !Number.isFinite(maxHeight);
+  maxHeightValue.textContent = off
+    ? "Off"
+    : formatHeight(maxHeight) +
+      (heightTransition > 0 ? `, easing from ${formatHeight(maxHeight - heightTransition)}` : "");
+  // Where the handles coincide, put the lower one on top so it can be dragged out to add a
+  // transition (except at "off", where the max height handle must come first).
+  const lowerOnTop = Number(maxHeightLower.value) >= Number(maxHeightUpper.value) && !off;
+  maxHeightLower.style.zIndex = lowerOnTop ? "2" : "1";
+  maxHeightUpper.style.zIndex = lowerOnTop ? "1" : "2";
+  renderer?.setMaxHeight?.({ maxHeight, heightTransition });
+  requestRender();
+}
+
+function readMaxHeightSliders(moved) {
+  let lower = Number(maxHeightLower.value);
+  let upper = Number(maxHeightUpper.value);
+  if (lower > upper) {
+    if (moved === maxHeightLower) {
+      upper = lower;
+      maxHeightUpper.value = String(upper);
+    } else {
+      lower = upper;
+      maxHeightLower.value = String(lower);
+    }
+  }
+  if (upper >= MAX_HEIGHT_OFF) {
+    maxHeight = Infinity;
+    heightTransition = 0;
+  } else {
+    maxHeight = 10 ** upper;
+    heightTransition = maxHeight - 10 ** lower;
+  }
+  applyMaxHeight();
+}
+
+/** Sets the max height (meters, Infinity = off) and the transition below it (meters). */
+function setMaxHeight(height, transition = 0) {
+  maxHeight = Number.isFinite(height) && height > 0 ? height : Infinity;
+  heightTransition = Number.isFinite(maxHeight) ? Math.min(Math.max(transition, 0), maxHeight) : 0;
+  const upper = Number.isFinite(maxHeight) ? Math.log10(maxHeight) : MAX_HEIGHT_OFF;
+  const lower = Math.log10(Math.max(maxHeight - heightTransition, 1));
+  maxHeightUpper.value = String(upper);
+  maxHeightLower.value = String(Math.min(lower, upper));
+  applyMaxHeight();
+}
+
+setMaxHeight(Infinity);
+maxHeightLower.addEventListener("input", () => readMaxHeightSliders(maxHeightLower));
+maxHeightUpper.addEventListener("input", () => readMaxHeightSliders(maxHeightUpper));
+
+// The vertex handles follow the max height rule too, shrinking with the patterns above it.
+viewer.scene.preRender.addEventListener(() => {
+  const height = viewer.camera.positionCartographic.height;
+  drawTool.setHandleScale(sizeScale(height, maxHeight, heightTransition));
+});
+
 // --- Line / stamp image comboboxes ("" = none) ----------------------------------------------
 const lineImageSelect = document.getElementById("lineImage");
 const stampImageSelect = document.getElementById("stampImage");
@@ -187,7 +257,8 @@ viewer.scene.postRender.addEventListener(() => {
 
 // --- Scene export / import (for sharing an exact view) -------------------------------------
 // In the devtools console: `app.exportState()` copies the shapes, camera, line width, stamp
-// spacing and shader to the clipboard as JSON; `app.importState(json)` recreates that scene.
+// spacing, max height, images and solution to the clipboard as JSON; `app.importState(json)`
+// recreates that scene.
 
 function exportState() {
   const camera = viewer.camera;
@@ -196,6 +267,8 @@ function exportState() {
     solution: solutionId,
     lineWidth,
     stampSpacing,
+    maxHeight: Number.isFinite(maxHeight) ? maxHeight : null, // null = off (JSON has no Infinity)
+    heightTransition,
     lineImage,
     stampImage,
     canvas: [viewer.canvas.clientWidth, viewer.canvas.clientHeight],
@@ -239,6 +312,9 @@ async function importState(json) {
   if (state.stampSpacing) {
     setStampSpacing(state.stampSpacing);
   }
+  if (state.maxHeight !== undefined) {
+    setMaxHeight(state.maxHeight ?? Infinity, state.heightTransition ?? 0);
+  }
   if (state.lineImage !== undefined || state.stampImage !== undefined) {
     setImages({ line: state.lineImage, stamp: state.stampImage });
   }
@@ -271,6 +347,7 @@ window.app = {
   viewer,
   drawTool,
   useSolution,
+  setMaxHeight,
   exportState,
   importState,
   get renderer() {

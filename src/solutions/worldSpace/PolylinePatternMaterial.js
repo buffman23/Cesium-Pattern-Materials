@@ -16,6 +16,7 @@ import {
   TextureMinificationFilter,
   TextureWrap,
 } from "cesium";
+import { sizeScale } from "../../shared/maxHeight.js";
 import mipmapTexture from "../../shared/mipmapTexture.js";
 import {
   createZoomSettle,
@@ -49,6 +50,11 @@ import {
 //    the first vertex (the first stamp touches it) and runs up to the last vertex, which cuts
 //    off the final stamp; moving the last vertex can make the line finish with a whole stamp.
 //
+// Max camera height: above it (sizeScale < 1, see maxHeight.js) both layers keep their ground
+// size instead of their on-screen size. The geometry stays v_width pixels wide (rebuilding it
+// every frame would be costly), so the pattern is drawn in a centred band v_width * sizeScale
+// pixels wide and the line looks thinner, like paint on the ground.
+//
 // Precision: st.s is a float32 fraction of the whole line, so distance along the line is only
 // resolved to lineLength * 2^-24 (22 cm on a 3,600 km line). Zoomed in close, stamps would
 // smear and vanish. Where that step size matters (metersPerPixel < preciseMetersPerPixel), the
@@ -70,6 +76,7 @@ uniform float spacing;          // stamp repeat as a multiple of the stamp lengt
 // Zoom level shifts (log2 units) that keep the fades from resting half faded; see zoomSettle.
 uniform float lineShift;
 uniform float stampShift;
+uniform float sizeScale;        // < 1 above the max camera height (pattern keeps its ground size)
 uniform float lineLength;
 uniform float preciseMetersPerPixel;
 uniform vec4 referenceA;        // xyz: point on the line (eye coords), w: distance mod modulus
@@ -131,11 +138,14 @@ vec4 over(vec4 top, vec4 bottom)
     return top + bottom * (1.0 - top.a);
 }
 
-// The line layer at "along" meters along the line, "t" across it.
-vec4 lineAt(float along, float t, float metersPerPixel)
+// The line layer at "along" meters along the line, "t" across it, for a band "widthPixels" wide.
+vec4 lineAt(float along, float t, float widthPixels, float metersPerPixel)
 {
+    if (t <= 0.0 || t >= 1.0) {
+        return vec4(0.0);
+    }
     vec2 imageSize = vec2(textureSize(lineImage, 0));
-    float natural = v_width * imageSize.x / imageSize.y * metersPerPixel;   // one period, meters
+    float natural = widthPixels * imageSize.x / imageSize.y * metersPerPixel;  // one period, meters
     // A power-of-two period in meters (1x-2x natural), anchored at the line start: it depends
     // only on zoom, and each level's pattern nests in the next. Just before the period doubles
     // it is nearly 2x stretched; cross-fade to half the period there.
@@ -225,7 +235,12 @@ czm_material czm_getMaterial(czm_materialInput materialInput)
     vec4 eyeCoordinate = czm_windowToEyeCoordinates(gl_FragCoord.xy, depth);
     eyeCoordinate /= eyeCoordinate.w;
     float metersPerPixel = max(czm_metersPerPixel(eyeCoordinate), 1e-6);
-    float width = v_width * metersPerPixel;        // line width on the ground, meters
+    // Above the max camera height (sizeScale < 1) the pattern keeps its ground size: it is drawn
+    // in a band v_width * sizeScale pixels wide, centred in the geometry's v_width band. Below
+    // one pixel the band stays one pixel wide and fades with its coverage instead of aliasing.
+    float bandPixels = min(max(v_width * sizeScale, 1.0), v_width);
+    float coverage = v_width * sizeScale / bandPixels;
+    float width = bandPixels * metersPerPixel;     // pattern band width on the ground, meters
 
     // Zoomed in close: measure along the line from the nearest reference point instead.
     bool precise = false;
@@ -260,11 +275,11 @@ czm_material czm_getMaterial(czm_materialInput materialInput)
         segmentEnd = vertexDistanceAt(segment + 1);
         lineEnds = vec2(segment == 0 ? 1.0 : 0.0, segment + 2 >= int(vertexCount) ? 1.0 : 0.0);
     }
-    float t = materialInput.st.t;
+    float t = (materialInput.st.t - 0.5) * v_width / bandPixels + 0.5;
 
     vec4 result = vec4(0.0);
     if (hasLine) {
-        result = lineAt(clamp(d, segmentStart, segmentEnd), t, metersPerPixel);
+        result = lineAt(clamp(d, segmentStart, segmentEnd), t, bandPixels, metersPerPixel);
     }
 
     if (hasStamp) {
@@ -358,6 +373,7 @@ czm_material czm_getMaterial(czm_materialInput materialInput)
         }
     }
 
+    result *= coverage;
     if (result.a < 0.005) {
         discard;
     }
@@ -392,14 +408,19 @@ export default class PolylinePatternMaterial {
   /**
    * @param {object} options
    * @param {string|HTMLImageElement|HTMLCanvasElement|null} [options.lineImage=null] One period
-   *   of a seamless line pattern (left and right edges must join), repeated along the line and
-   *   bounded by the vertices. null = no line.
+   *   of a seamless line pattern (left and right edges must join), repeated along the line.
+   *   null = no line.
    * @param {string|HTMLImageElement|HTMLCanvasElement|null} [options.stampImage=null] A symbol on
    *   a transparent background, drawn on top. null = no stamps.
    * @param {Color} [options.lineColor=Color.WHITE] Tint multiplied with the line image.
    * @param {Color} [options.stampColor=Color.WHITE] Tint multiplied with the stamp image.
    * @param {number} [options.spacing=1] Distance between stamps as a multiple of the stamp
    *   length (1 = touching, down to 0.25 = overlapping). Changeable via `material.uniforms.spacing`.
+   * @param {number} [options.maxHeight=Infinity] Camera height (meters) above which the pattern,
+   *   line thickness included, keeps its ground size instead of its on-screen size. Changeable
+   *   via `material.maxHeight`.
+   * @param {number} [options.heightTransition=0] Meters below `maxHeight` over which that eases
+   *   in. Changeable via `material.heightTransition`.
    * @returns {Material}
    */
   static create({
@@ -408,6 +429,8 @@ export default class PolylinePatternMaterial {
     lineColor = Color.WHITE,
     stampColor = Color.WHITE,
     spacing = 1,
+    maxHeight = Infinity,
+    heightTransition = 0,
   } = {}) {
     const material = new Material({
       fabric: {
@@ -420,6 +443,7 @@ export default class PolylinePatternMaterial {
           spacing,
           lineShift: 0,
           stampShift: 0,
+          sizeScale: 1,
           lineLength: 1,
           preciseMetersPerPixel: 0,
           referenceA: new Cartesian4(),
@@ -451,6 +475,8 @@ export default class PolylinePatternMaterial {
     material.lineAspect = imageAspect(lineImage);
     material.stampAspect = imageAspect(stampImage);
     material.zoomSettle = createZoomSettle();
+    material.maxHeight = maxHeight;
+    material.heightTransition = heightTransition;
 
     // Data textures need the WebGL context, which Material only gets in update.
     const originalUpdate = material.update.bind(material);
@@ -561,8 +587,9 @@ export default class PolylinePatternMaterial {
 
   /**
    * Updates the camera-dependent uniforms (close-range reference points and the vertex frames,
-   * in double precision; the zoom fade level shifts). Call every frame: while the fades are
-   * settling after the camera height stops changing, it requests further frames itself.
+   * in double precision; the max camera height scale; the zoom fade level shifts). Call every
+   * frame: while the fades are settling after the camera height stops changing, it requests
+   * further frames itself.
    *
    * @param {Material} material
    * @param {Scene} scene
@@ -570,11 +597,16 @@ export default class PolylinePatternMaterial {
   static updateCamera(material, scene) {
     const camera = scene.camera;
     const uniforms = material.uniforms;
+    uniforms.sizeScale = sizeScale(
+      camera.positionCartographic.height,
+      material.maxHeight,
+      material.heightTransition,
+    );
 
     // Pixels here are CSS pixels, like the shader's metersPerPixel.
     const stampPixels = material.lineWidth * material.stampAspect * Math.max(uniforms.spacing, MIN_SPACING);
     const linePixels = material.lineWidth * material.lineAspect;
-    const metersPerPixel = referenceMetersPerPixel(scene);
+    const metersPerPixel = referenceMetersPerPixel(scene) * uniforms.sizeScale;
     const shifts = updateZoomSettle(material.zoomSettle, scene, {
       line: { level: Math.log2(linePixels * metersPerPixel), window: [0, 0.2] },
       stamp: { level: Math.log2(stampPixels * metersPerPixel), window: [0.9, 1] },

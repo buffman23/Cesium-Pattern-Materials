@@ -9,6 +9,7 @@ import {
   Matrix4,
   Transforms,
 } from "cesium";
+import { sizeScale } from "../../shared/maxHeight.js";
 import mipmapTexture from "../../shared/mipmapTexture.js";
 import {
   createZoomSettle,
@@ -49,6 +50,7 @@ uniform vec3 cameraUp;          // unit vector from the sphere center to the cam
 uniform vec2 cameraHigh;        // camera east/north = cameraHigh + cameraLow
 uniform vec2 cameraLow;
 uniform float levelShift;       // keeps the cross-fade from resting half faded; see zoomSettle
+uniform float sizeScale;        // < 1 above the max camera height (pattern keeps its ground size)
 
 czm_material czm_getMaterial(czm_materialInput materialInput)
 {
@@ -78,7 +80,7 @@ czm_material czm_getMaterial(czm_materialInput materialInput)
     // czm_metersPerPixel is per CSS pixel (it already includes the pixel ratio), like tileSize.
     // The +0.5 centres the tile on tileSize: size0 is ~0.7x..1.4x tileSize pixels. The two
     // scales cross-fade over the last 20% of a level (fract(level) in 0.8..1).
-    float level = log2(tileSize * metersPerPixel) + 0.5 + levelShift;
+    float level = log2(tileSize * metersPerPixel * sizeScale) + 0.5 + levelShift;
     float k = floor(level);
     float blend = smoothstep(0.8, 1.0, level - k);
     float size0 = exp2(k);
@@ -128,9 +130,19 @@ export default class PolygonPatternMaterial {
    * @param {string|HTMLImageElement|HTMLCanvasElement} options.image Seamless tile image.
    * @param {Color} [options.color=Color.WHITE] Tint multiplied with the image.
    * @param {number} [options.tileSize=48] Approximate on-screen tile size, in pixels.
+   * @param {number} [options.maxHeight=Infinity] Camera height (meters) above which the tile
+   *   keeps its ground size instead of its on-screen size. Changeable via `material.maxHeight`.
+   * @param {number} [options.heightTransition=0] Meters below `maxHeight` over which that eases
+   *   in. Changeable via `material.heightTransition`.
    * @returns {Material}
    */
-  static create({ image, color = Color.WHITE, tileSize = 48 }) {
+  static create({
+    image,
+    color = Color.WHITE,
+    tileSize = 48,
+    maxHeight = Infinity,
+    heightTransition = 0,
+  }) {
     const material = new Material({
       fabric: {
         type: PolygonPatternMaterial.TYPE,
@@ -146,6 +158,7 @@ export default class PolygonPatternMaterial {
           cameraHigh: new Cartesian2(),
           cameraLow: new Cartesian2(),
           levelShift: 0,
+          sizeScale: 1,
         },
         source,
       },
@@ -154,6 +167,8 @@ export default class PolygonPatternMaterial {
     material.localToWorld = Matrix4.clone(Matrix4.IDENTITY);
     material.worldToLocal = Matrix4.clone(Matrix4.IDENTITY);
     material.zoomSettle = createZoomSettle();
+    material.maxHeight = maxHeight;
+    material.heightTransition = heightTransition;
     return mipmapTexture(material, "image");
   }
 
@@ -181,8 +196,9 @@ export default class PolygonPatternMaterial {
    * that is where precision matters, and a sphere fit at the polygon's center would sit tens of
    * meters below the real surface far from the center, making the pattern lag the camera.
    *
-   * It also advances the zoom fade's level shift (see zoomSettle); while that is settling after
-   * the camera height stops changing, it requests further frames itself.
+   * It also applies the max camera height (see maxHeight.js) and advances the zoom fade's level
+   * shift (see zoomSettle); while that is settling after the camera height stops changing, it
+   * requests further frames itself.
    *
    * @param {Material} material
    * @param {Scene} scene
@@ -190,7 +206,13 @@ export default class PolygonPatternMaterial {
   static updateCamera(material, scene) {
     const camera = scene.camera;
     const uniforms = material.uniforms;
-    const level = Math.log2(uniforms.tileSize * referenceMetersPerPixel(scene)) + 0.5;
+    uniforms.sizeScale = sizeScale(
+      camera.positionCartographic.height,
+      material.maxHeight,
+      material.heightTransition,
+    );
+    const metersPerPixel = referenceMetersPerPixel(scene) * uniforms.sizeScale;
+    const level = Math.log2(uniforms.tileSize * metersPerPixel) + 0.5;
     uniforms.levelShift = updateZoomSettle(material.zoomSettle, scene, {
       tile: { level, window: [0.8, 1] },
     }).tile;

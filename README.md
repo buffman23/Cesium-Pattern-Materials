@@ -30,6 +30,13 @@ Cesium and no terrain, so the ground is the WGS84 ellipsoid.
 - These controls change every polyline live:
   - the **Line width** and **Stamp spacing** sliders;
   - the **Line image** and **Stamp image** comboboxes, where "None" removes that layer.
+- The **Max height** slider has two handles, on a logarithmic 1 km – 20,000 km scale. Above the
+  max height (dark handle) both patterns stop keeping their on-screen size and keep their
+  ground size instead, shrinking like paint on the ground (the polyline gets thinner too). The
+  vertex handles shrink by the same factor (`DrawTool.setHandleScale`), down to 4 px so they
+  stay grabbable. The light handle sets where a smooth transition into that starts. The far right end means off.
+  Dragging one handle past the other pushes it along; `app.setMaxHeight(meters, transition)`
+  sets them from the console.
 - The toolbar shows the current camera height.
 - To share an exact view, run `app.exportState()` in the browser console; it copies the shapes,
   camera, sliders and images as JSON. `app.importState(json)` recreates that view.
@@ -52,6 +59,7 @@ src/solutions/worldSpace/
 src/shared/
   mipmapTexture.js                       Adds mipmaps and a sampler to a material's image texture
   zoomSettle.js                          Keeps zoom cross-fades from resting half faded
+  maxHeight.js                           Soft cap: scale factor above the max camera height
   testPatterns.js                        Test images, colors, line width and tile size
 public/patterns/                         Line images: line-solid/-dashed/-wave/-sawtooth.svg
                                          Stamp images: x-symbol.svg, arrow-symbol.svg (256x128)
@@ -268,6 +276,17 @@ levels just fades the in-between lines.
 
 ## Shared details
 
+- **Max camera height** (`src/shared/maxHeight.js`). Both materials take `maxHeight` (meters,
+  `Infinity` = off) and `heightTransition` (meters below it), as `create()` options or by
+  setting `material.maxHeight` / `material.heightTransition`. Every frame, `updateCamera`
+  computes `sizeScale = effectiveHeight / cameraHeight`, with a smooth (C¹) soft cap:
+  `effectiveHeight` is the camera height up to `H − T`, eases with
+  `h − (h − (H − T))² / 2T` up to `H`, and stays at `H − T/2` above it. The shaders multiply
+  the meters per pixel they size patterns by with `sizeScale`, so above `H` the pattern's
+  ground size is constant (top-down, meters per pixel is proportional to height). The zoom
+  settle levels use the same scale. The polyline's geometry stays `v_width` pixels wide
+  (rebuilding it every frame would be costly), so its pattern is drawn in a centred band
+  `v_width × sizeScale` pixels wide; below one pixel that band fades with its coverage.
 - **Mipmaps** (`src/shared/mipmapTexture.js`). Cesium's Material uploads images without
   mipmaps, so a detailed tile drawn small shimmers and shows bands. This helper wraps the
   material's `update`: once the image texture exists, it generates mipmaps and sets a trilinear

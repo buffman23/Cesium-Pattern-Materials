@@ -56,6 +56,8 @@ export default async function createRenderer(viewer) {
   const rendered = new Map();
   let lineWidth = LINE_WIDTH;
   let stampSpacing = STAMP_SPACING;
+  let maxHeight = Infinity; // camera height above which patterns keep their ground size
+  let heightTransition = 0; // meters below maxHeight over which that eases in
   let lineImageKey = DEFAULT_LINE_IMAGE; // a key of LINE_IMAGES, or null for no line
   let stampImageKey = DEFAULT_STAMP_IMAGE; // a key of STAMP_IMAGES, or null for no stamps
   const lineImageFor = (key) => (key ? lineImages[key] : null);
@@ -125,6 +127,8 @@ export default async function createRenderer(viewer) {
           lineColor: LINE_COLOR,
           stampColor: STAMP_COLOR,
           spacing: stampSpacing,
+          maxHeight,
+          heightTransition,
         }),
       };
       rendered.set(shape.id, state);
@@ -147,6 +151,8 @@ export default async function createRenderer(viewer) {
           image: hatchImage,
           color: HATCH_COLOR,
           tileSize: HATCH_TILE_PIXELS,
+          maxHeight,
+          heightTransition,
         }),
       };
       rendered.set(shape.id, state);
@@ -245,6 +251,23 @@ export default async function createRenderer(viewer) {
           buildPolyline(state);
         } else if (state.shape) {
           updatePolygon(state.shape);
+        }
+      }
+    },
+    /**
+     * Sets the camera height (meters, Infinity = off) above which both patterns keep their
+     * ground size, and the meters below it over which that eases in. Read by the materials'
+     * updateCamera, so no rebuild needed.
+     */
+    setMaxHeight({ maxHeight: height = maxHeight, heightTransition: transition = heightTransition } = {}) {
+      maxHeight = height;
+      heightTransition = transition;
+      for (const state of rendered.values()) {
+        for (const material of [state.material, state.polygonMaterial]) {
+          if (material) {
+            material.maxHeight = maxHeight;
+            material.heightTransition = heightTransition;
+          }
         }
       }
     },

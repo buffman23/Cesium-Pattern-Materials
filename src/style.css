@@ -81,7 +81,8 @@ body,
 }
 
 #lineWidthValue,
-#stampSpacingValue {
+#stampSpacingValue,
+#maxHeightValue {
   color: #eee;
   font-family: ui-monospace, Consolas, monospace;
   font-variant-numeric: tabular-nums;
@@ -91,6 +92,75 @@ body,
 #stampSpacing {
   width: 100%;
   margin: 0 0 6px;
+}
+
+/* Two range inputs stacked on one track (drawn by the container); only the thumbs take the
+   pointer, so either handle can be dragged. */
+.dual-range {
+  position: relative;
+  height: 20px;
+  margin: 0 0 6px;
+}
+
+.dual-range::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 8px;
+  height: 4px;
+  border-radius: 2px;
+  background: #777;
+}
+
+.dual-range input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 20px;
+  margin: 0;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  pointer-events: none;
+}
+
+.dual-range input::-webkit-slider-runnable-track {
+  background: transparent;
+}
+
+.dual-range input::-moz-range-track {
+  background: transparent;
+}
+
+.dual-range input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #2d6cdf;
+  border: 2px solid #eee;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.dual-range input::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #2d6cdf;
+  border: 2px solid #eee;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+/* The transition-start handle is lighter, so the two can be told apart. */
+#maxHeightLower::-webkit-slider-thumb {
+  background: #9bbcf5;
+}
+
+#maxHeightLower::-moz-range-thumb {
+  background: #9bbcf5;
 }
 
 #cameraHeight {

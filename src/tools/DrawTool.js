@@ -11,6 +11,10 @@ export const MIN_POINTS = { polyline: 2, polygon: 3 };
 // Clicks closer than this (pixels) to the previous vertex are ignored; this swallows the
 // second click of a double-click, which is used to finish the shape.
 const DUPLICATE_CLICK_PIXELS = 4;
+// Vertex handle size (pixels) at scale 1, and the smallest size it shrinks to (still grabbable).
+const HANDLE_PIXELS = 12;
+const HANDLE_OUTLINE_PIXELS = 2;
+const MIN_HANDLE_PIXELS = 4;
 
 let nextShapeId = 0;
 
@@ -36,6 +40,7 @@ export default class DrawTool {
     this.active = undefined; // shape being drawn
     this.lastClick = undefined;
     this.dragging = undefined; // { shape, index }
+    this.handleScale = 1; // see setHandleScale
 
     this.handles = this.scene.primitives.add(new PointPrimitiveCollection());
     this.handler = new ScreenSpaceEventHandler(this.scene.canvas);
@@ -119,6 +124,25 @@ export default class DrawTool {
     shape.committed.forEach((position, index) => this.#addHandle(shape, index, position));
     this.onChange(shape);
     return shape;
+  }
+
+  /**
+   * Scale the vertex handles (1 = full size), e.g. to shrink them with the patterns above a
+   * max camera height. They never get smaller than MIN_HANDLE_PIXELS, so they stay grabbable.
+   */
+  setHandleScale(scale) {
+    if (scale === this.handleScale) {
+      return;
+    }
+    this.handleScale = scale;
+    const { pixelSize, outlineWidth } = this.#handleSize();
+    for (const shape of this.shapes) {
+      for (const handle of shape.handles) {
+        handle.pixelSize = pixelSize;
+        handle.outlineWidth = outlineWidth;
+      }
+    }
+    this.scene.requestRender();
   }
 
   /** Remove every shape. */
@@ -210,16 +234,20 @@ export default class DrawTool {
     const id = { drawToolHandle: true, shape, index, point: undefined };
     const point = this.handles.add({
       position,
-      pixelSize: 12,
+      ...this.#handleSize(),
       color: Color.WHITE,
       outlineColor: Color.BLACK,
-      outlineWidth: 2,
       disableDepthTestDistance: Number.POSITIVE_INFINITY,
       id,
     });
     id.point = point;
     shape.handles.push(point);
     this.scene.requestRender();
+  }
+
+  #handleSize() {
+    const pixelSize = Math.max(HANDLE_PIXELS * this.handleScale, MIN_HANDLE_PIXELS);
+    return { pixelSize, outlineWidth: (HANDLE_OUTLINE_PIXELS * pixelSize) / HANDLE_PIXELS };
   }
 
   #notify(shape) {
