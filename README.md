@@ -144,17 +144,18 @@ neighboring pixels amplifies the noise. As a result:
 - seen top-down, sizes are exact at any zoom;
 - when the camera tilts, everything foreshortens with the draped line, like paint on the ground.
 
-**Line layer.** The line image is repeated along each segment, fitted so the segment holds a
-power-of-two number of whole periods. The pattern therefore starts and ends on a period boundary
-at every vertex: dashes, waves and teeth are never cut mid-shape. The pattern stays anchored to
-the ground. As you zoom, the period stretches 1×–2×, and just before the count doubles the two
-counts cross-fade briefly. The image must be seamless, with matching left and right edges, and
-the shader samples it with `fract(phase)` and a REPEAT sampler.
+**Line layer.** The line image is tiled like the stamp grid: the period is `2^k` meters, with
+`k` chosen per pixel so the period is 1×–2× the image's natural length, and the pattern is
+anchored at the start of the line and runs on across vertices. Its size therefore depends only
+on the camera height; moving a vertex never stretches it. As you zoom, the period stretches
+1×–2×, and just before it halves the two periods cross-fade briefly. The image must be seamless,
+with matching left and right edges, and the shader samples it with `fract(phase)` and a REPEAT
+sampler. (Earlier, each segment held a power-of-two number of whole periods, so dashes never
+cut at a vertex, but dragging a vertex stretched the pattern.)
 
 In the mitered wedge outside a corner, Cesium clamps `st.s` to the vertex. The wedge therefore
-shows the image's edge column: the profile the line arrives with, extended until the two
-segments' profiles meet at the miter. For a solid line that's a clean miter join, and for a
-wave or sawtooth it's the miter of its edge profile.
+shows the image column at the vertex, extended until the two segments meet at the miter. For a
+solid line that's a clean miter join; a dash or a gap may now end at a corner.
 
 **Stamp layer.** Stamps are drawn on top at a near-constant pixel size, anchored to the line.
 The spacing level comes from the repeat length, `stamp length × spacing`, so stamps sit 1–2

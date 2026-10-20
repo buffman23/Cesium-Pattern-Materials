@@ -25,12 +25,12 @@ import mipmapTexture from "../../shared/mipmapTexture.js";
 // ratio: one image = lineWidth * imageWidth / imageHeight pixels along the line):
 //
 //  - Line image: a seamless pattern (solid, dashed, wave, sawtooth ...) repeated along the
-//    line and bounded by the vertices: each segment holds a whole power-of-two number of
-//    periods, so the pattern starts and ends cleanly at every vertex and stays anchored to the
-//    ground (the period stretches 1x-2x as you zoom; near a power-of-two step the two period
-//    counts cross-fade briefly). In the mitered wedge outside a corner, GroundPolylinePrimitive
-//    clamps st.s to the vertex, so the wedge shows the image's edge column - for a seamless
-//    pattern that is the profile the line arrives with, which gives a clean miter join.
+//    line, anchored to the ground and to the start of the line, like the stamps: the period is
+//    2^k meters, k chosen per fragment so it is 1x-2x the image's natural length, so it only
+//    stretches with zoom, never when a vertex moves (near a power-of-two step the two periods
+//    cross-fade briefly). The pattern runs on across vertices. In the mitered wedge outside a
+//    corner, GroundPolylinePrimitive clamps st.s to the vertex, so the wedge shows the image
+//    column at the vertex, extended until the two segments meet at the miter.
 //
 //  - Stamp image: a symbol on a transparent background, drawn on top at a near-constant pixel
 //    size and anchored to the line. Stamp spacing is 2^k meters, k chosen per fragment so it is
@@ -49,8 +49,8 @@ import mipmapTexture from "../../shared/mipmapTexture.js";
 // smear and vanish. Where that step size matters (metersPerPixel < preciseMetersPerPixel), the
 // distance is instead measured in eye space from reference points on the line near the camera,
 // computed every frame on the CPU in double precision (see updateCamera). Their distances along
-// the line are passed modulo a power of two larger than any stamp spacing used there, so stamp
-// positions and the every-second-stamp fade stay consistent. (The GLSL lives in a JS template
+// the line are passed modulo a power of two larger than any stamp spacing or line period used
+// there, so stamp positions, the every-second-stamp fade and the line phase stay consistent. (The GLSL lives in a JS template
 // string: never put a backtick in a shader comment.)
 const source = /* glsl */ `
 in float v_width;               // line width in pixels, provided by GroundPolylinePrimitive
@@ -123,18 +123,19 @@ vec4 over(vec4 top, vec4 bottom)
     return top + bottom * (1.0 - top.a);
 }
 
-// The line layer for the segment [a, b] at "along" meters along the line, "t" across it.
-vec4 lineAt(float along, float t, float a, float b, float metersPerPixel)
+// The line layer at "along" meters along the line, "t" across it.
+vec4 lineAt(float along, float t, float metersPerPixel)
 {
     vec2 imageSize = vec2(textureSize(lineImage, 0));
-    float segmentLength = max(b - a, 1e-6);
     float natural = v_width * imageSize.x / imageSize.y * metersPerPixel;   // one period, meters
-    // A power-of-two number of periods per segment: anchored, nests across zoom levels.
-    float x = log2(max(segmentLength / natural, 1.0));
-    float periods = exp2(floor(x));
-    float blend = smoothstep(0.8, 1.0, fract(x));       // cross-fade just before doubling
-    float period = segmentLength / periods;
-    float phase = (along - a) / period;
+    // A power-of-two period in meters (1x-2x natural), anchored at the line start: it depends
+    // only on zoom, and each level's pattern nests in the next. Just before the period doubles
+    // it is nearly 2x stretched; cross-fade to half the period there.
+    float level = log2(natural);
+    float k = ceil(level);
+    float blend = smoothstep(0.8, 1.0, k - level);
+    float period = exp2(k);
+    float phase = along / period;
     float lod = max(log2(imageSize.x * metersPerPixel / (period * czm_pixelRatio)), 0.0);
     vec4 coarse = textureLod(lineImage, vec2(fract(phase), t), lod);
     vec4 fine = textureLod(lineImage, vec2(fract(2.0 * phase), t), lod + 1.0);
@@ -255,8 +256,7 @@ czm_material czm_getMaterial(czm_materialInput materialInput)
 
     vec4 result = vec4(0.0);
     if (hasLine) {
-        result = lineAt(clamp(d, segmentStart, segmentEnd), t, segmentStart, segmentEnd,
-                        metersPerPixel);
+        result = lineAt(clamp(d, segmentStart, segmentEnd), t, metersPerPixel);
     }
 
     if (hasStamp) {
@@ -438,6 +438,7 @@ export default class PolylinePatternMaterial {
     material.pendingVertexFrames = undefined;
     // CPU copies of what the shader derives itself; used for the close-zoom precision math.
     material.lineWidth = 1;
+    material.lineAspect = imageAspect(lineImage);
     material.stampAspect = imageAspect(stampImage);
 
     // Data textures need the WebGL context, which Material only gets in update.
@@ -465,11 +466,13 @@ export default class PolylinePatternMaterial {
         material.pendingVertexFrames = undefined;
       }
       originalUpdate(context);
-      // Once the stamp has loaded (e.g. from a URL), take its aspect ratio from the texture.
+      // Once an image has loaded (e.g. from a URL), take its aspect ratio from the texture.
       // Relies on the private Material._textures, like mipmapTexture.
-      const texture = material._textures.stampImage;
-      if (texture && texture !== context.defaultTexture && texture.height > 0) {
-        material.stampAspect = texture.width / texture.height;
+      for (const [uniformName, key] of [["lineImage", "lineAspect"], ["stampImage", "stampAspect"]]) {
+        const texture = material._textures[uniformName];
+        if (texture && texture !== context.defaultTexture && texture.height > 0) {
+          material[key] = texture.width / texture.height;
+        }
       }
     };
 
@@ -496,6 +499,7 @@ export default class PolylinePatternMaterial {
   static setImages(material, { lineImage, stampImage } = {}) {
     if (lineImage !== undefined) {
       material.uniforms.lineImage = lineImage ?? Material.DefaultImageId;
+      material.lineAspect = imageAspect(lineImage);
     }
     if (stampImage !== undefined) {
       material.uniforms.stampImage = stampImage ?? Material.DefaultImageId;
@@ -555,11 +559,14 @@ export default class PolylinePatternMaterial {
     const uniforms = material.uniforms;
     const step = uniforms.lineLength * 2 ** -24;
     uniforms.preciseMetersPerPixel = step * PRECISE_STEP_FRACTION;
-    // Stamp spacing is at most 2 repeat lengths; keep the modulus a multiple of twice that so
-    // the stamp index parity (every-second-stamp fade) is preserved. Pixels here are CSS pixels,
+    // Stamp spacing is at most 2 repeat lengths and the line period at most 2 image lengths;
+    // keep the modulus a multiple of twice the larger so the stamp index parity
+    // (every-second-stamp fade) and the line phase are preserved. Pixels here are CSS pixels,
     // like the shader's metersPerPixel.
-    const repeatPixels =
-      material.lineWidth * material.stampAspect * Math.max(uniforms.spacing, MIN_SPACING);
+    const repeatPixels = material.lineWidth * Math.max(
+      material.stampAspect * Math.max(uniforms.spacing, MIN_SPACING),
+      material.lineAspect,
+    );
     const maxSpacing = 2 * repeatPixels * uniforms.preciseMetersPerPixel;
     const modulus = 2 ** Math.ceil(Math.log2(Math.max(2 * maxSpacing, 1e-3)));
 
