@@ -25,12 +25,13 @@
       <label for="maxHeightUpper" class="slider-label">
         Max height <span id="maxHeightValue"></span>
       </label>
-      <!-- Two handles on one logarithmic track: value v gives 10^v meters (1 km..20,000 km).
+      <!-- Per shape, in multiples of the camera height at which the shape's bounding box fills
+           the view. Two handles on one logarithmic track: value v gives 2^v (0.125x..19x).
            Lower = where the transition starts, upper = max height; the far right end = off. -->
       <div id="maxHeight" class="dual-range">
-        <input id="maxHeightLower" type="range" min="3" max="7.3" step="0.01"
+        <input id="maxHeightLower" type="range" min="-3" max="4.25" step="0.01"
                aria-label="Transition start" />
-        <input id="maxHeightUpper" type="range" min="3" max="7.3" step="0.01"
+        <input id="maxHeightUpper" type="range" min="-3" max="4.25" step="0.01"
                aria-label="Max height" />
       </div>
       <div class="row">

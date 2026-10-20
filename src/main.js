@@ -9,7 +9,7 @@ import {
 } from "cesium";
 import DrawTool, { MIN_POINTS } from "./tools/DrawTool.js";
 import solutions from "./solutions/index.js";
-import { sizeScale } from "./shared/maxHeight.js";
+import { boundingBoxDiagonal, fitMaxHeight, sizeScale } from "./shared/maxHeight.js";
 import { LINE_WIDTH, STAMP_SPACING } from "./shared/testPatterns.js";
 
 // --- Viewer (offline imagery, no Ion token needed) -----------------------------------------
@@ -68,7 +68,7 @@ async function useSolution(id) {
   renderer = created;
   renderer.setLineWidth?.(lineWidth);
   renderer.setStampSpacing?.(stampSpacing);
-  renderer.setMaxHeight?.({ maxHeight, heightTransition });
+  renderer.setMaxHeight?.({ factor: maxHeightFactor, easeFrom: maxHeightEaseFrom });
   renderer.setImages?.({ line: lineImage, stamp: stampImage });
   // Re-render the existing shapes with the newly selected solution.
   for (const shape of drawTool.shapes) {
@@ -140,28 +140,31 @@ stampSpacingInput.addEventListener("input", () =>
   setStampSpacing(2 ** Number(stampSpacingInput.value)),
 );
 
-// --- Max height slider (two handles) ---------------------------------------------------------
-// Value v -> 10^v meters. Upper handle = max camera height (the far right end = off), lower
-// handle = where the transition below it starts. Each handle pushes the other along.
+// --- Max height slider (two handles, fitted to each shape) ------------------------------------
+// Per shape, in units of its "fit height": the camera height at which its bounding box fills
+// the view (see fitMaxHeight). Value v -> 2^v fit heights. Upper handle = max height (the far
+// right end = off), lower handle = where easing into it starts. Each pushes the other along.
 const maxHeightLower = document.getElementById("maxHeightLower");
 const maxHeightUpper = document.getElementById("maxHeightUpper");
 const maxHeightValue = document.getElementById("maxHeightValue");
 const MAX_HEIGHT_OFF = Number(maxHeightUpper.max);
-let maxHeight = Infinity;
-let heightTransition = 0;
+let maxHeightFactor = Infinity;
+let maxHeightEaseFrom = 0;
+
+const formatFactor = (factor) => `${factor.toFixed(2)}×`;
 
 function applyMaxHeight() {
-  const off = !Number.isFinite(maxHeight);
+  const off = !Number.isFinite(maxHeightFactor);
   maxHeightValue.textContent = off
     ? "Off"
-    : formatHeight(maxHeight) +
-      (heightTransition > 0 ? `, easing from ${formatHeight(maxHeight - heightTransition)}` : "");
+    : `${formatFactor(maxHeightFactor)} fit` +
+      (maxHeightEaseFrom < maxHeightFactor ? `, easing from ${formatFactor(maxHeightEaseFrom)}` : "");
   // Where the handles coincide, put the lower one on top so it can be dragged out to add a
   // transition (except at "off", where the max height handle must come first).
   const lowerOnTop = Number(maxHeightLower.value) >= Number(maxHeightUpper.value) && !off;
   maxHeightLower.style.zIndex = lowerOnTop ? "2" : "1";
   maxHeightUpper.style.zIndex = lowerOnTop ? "1" : "2";
-  renderer?.setMaxHeight?.({ maxHeight, heightTransition });
+  renderer?.setMaxHeight?.({ factor: maxHeightFactor, easeFrom: maxHeightEaseFrom });
   requestRender();
 }
 
@@ -178,23 +181,25 @@ function readMaxHeightSliders(moved) {
     }
   }
   if (upper >= MAX_HEIGHT_OFF) {
-    maxHeight = Infinity;
-    heightTransition = 0;
+    maxHeightFactor = Infinity;
   } else {
-    maxHeight = 10 ** upper;
-    heightTransition = maxHeight - 10 ** lower;
+    maxHeightFactor = 2 ** upper;
   }
+  maxHeightEaseFrom = 2 ** lower;
   applyMaxHeight();
 }
 
-/** Sets the max height (meters, Infinity = off) and the transition below it (meters). */
-function setMaxHeight(height, transition = 0) {
-  maxHeight = Number.isFinite(height) && height > 0 ? height : Infinity;
-  heightTransition = Number.isFinite(maxHeight) ? Math.min(Math.max(transition, 0), maxHeight) : 0;
-  const upper = Number.isFinite(maxHeight) ? Math.log10(maxHeight) : MAX_HEIGHT_OFF;
-  const lower = Math.log10(Math.max(maxHeight - heightTransition, 1));
+/**
+ * Sets the max height, in fit heights (Infinity = off), and where easing into it starts, in
+ * fit heights (default: no easing).
+ */
+function setMaxHeight(factor, easeFrom = factor) {
+  maxHeightFactor = Number.isFinite(factor) && factor > 0 ? factor : Infinity;
+  const upper = Number.isFinite(maxHeightFactor) ? Math.log2(maxHeightFactor) : MAX_HEIGHT_OFF;
+  const lower = Math.min(Math.log2(Math.max(easeFrom, 2 ** Number(maxHeightLower.min))), upper);
+  maxHeightEaseFrom = 2 ** lower;
   maxHeightUpper.value = String(upper);
-  maxHeightLower.value = String(Math.min(lower, upper));
+  maxHeightLower.value = String(lower);
   applyMaxHeight();
 }
 
@@ -202,10 +207,14 @@ setMaxHeight(Infinity);
 maxHeightLower.addEventListener("input", () => readMaxHeightSliders(maxHeightLower));
 maxHeightUpper.addEventListener("input", () => readMaxHeightSliders(maxHeightUpper));
 
-// The vertex handles follow the max height rule too, shrinking with the patterns above it.
+// The vertex handles follow the max height rule too, shrinking with each shape's patterns.
 viewer.scene.preRender.addEventListener(() => {
   const height = viewer.camera.positionCartographic.height;
-  drawTool.setHandleScale(sizeScale(height, maxHeight, heightTransition));
+  for (const shape of drawTool.shapes) {
+    const diagonal = boundingBoxDiagonal(shape.positions);
+    const fitted = fitMaxHeight(diagonal, viewer.camera, maxHeightFactor, maxHeightEaseFrom);
+    drawTool.setHandleScale(sizeScale(height, fitted.maxHeight, fitted.heightTransition), [shape]);
+  }
 });
 
 // --- Line / stamp image comboboxes ("" = none) ----------------------------------------------
@@ -267,8 +276,9 @@ function exportState() {
     solution: solutionId,
     lineWidth,
     stampSpacing,
-    maxHeight: Number.isFinite(maxHeight) ? maxHeight : null, // null = off (JSON has no Infinity)
-    heightTransition,
+    // In fit heights; null = off (JSON has no Infinity).
+    maxHeightFactor: Number.isFinite(maxHeightFactor) ? maxHeightFactor : null,
+    maxHeightEaseFrom,
     lineImage,
     stampImage,
     canvas: [viewer.canvas.clientWidth, viewer.canvas.clientHeight],
@@ -312,8 +322,9 @@ async function importState(json) {
   if (state.stampSpacing) {
     setStampSpacing(state.stampSpacing);
   }
-  if (state.maxHeight !== undefined) {
-    setMaxHeight(state.maxHeight ?? Infinity, state.heightTransition ?? 0);
+  if (state.maxHeightFactor !== undefined) {
+    const factor = state.maxHeightFactor ?? Infinity;
+    setMaxHeight(factor, state.maxHeightEaseFrom ?? factor);
   }
   if (state.lineImage !== undefined || state.stampImage !== undefined) {
     setImages({ line: state.lineImage, stamp: state.stampImage });

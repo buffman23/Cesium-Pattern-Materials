@@ -40,7 +40,6 @@ export default class DrawTool {
     this.active = undefined; // shape being drawn
     this.lastClick = undefined;
     this.dragging = undefined; // { shape, index }
-    this.handleScale = 1; // see setHandleScale
 
     this.handles = this.scene.primitives.add(new PointPrimitiveCollection());
     this.handler = new ScreenSpaceEventHandler(this.scene.canvas);
@@ -127,22 +126,27 @@ export default class DrawTool {
   }
 
   /**
-   * Scale the vertex handles (1 = full size), e.g. to shrink them with the patterns above a
-   * max camera height. They never get smaller than MIN_HANDLE_PIXELS, so they stay grabbable.
+   * Scale the vertex handles (1 = full size) of the given shapes (default: all), e.g. to shrink
+   * them with the patterns above a max camera height. They never get smaller than
+   * MIN_HANDLE_PIXELS, so they stay grabbable.
    */
-  setHandleScale(scale) {
-    if (scale === this.handleScale) {
-      return;
-    }
-    this.handleScale = scale;
-    const { pixelSize, outlineWidth } = this.#handleSize();
-    for (const shape of this.shapes) {
+  setHandleScale(scale, shapes = this.shapes) {
+    let changed = false;
+    for (const shape of shapes) {
+      if (shape.handleScale === scale) {
+        continue;
+      }
+      shape.handleScale = scale;
+      const { pixelSize, outlineWidth } = this.#handleSize(shape);
       for (const handle of shape.handles) {
         handle.pixelSize = pixelSize;
         handle.outlineWidth = outlineWidth;
       }
+      changed = true;
     }
-    this.scene.requestRender();
+    if (changed) {
+      this.scene.requestRender();
+    }
   }
 
   /** Remove every shape. */
@@ -234,7 +238,7 @@ export default class DrawTool {
     const id = { drawToolHandle: true, shape, index, point: undefined };
     const point = this.handles.add({
       position,
-      ...this.#handleSize(),
+      ...this.#handleSize(shape),
       color: Color.WHITE,
       outlineColor: Color.BLACK,
       disableDepthTestDistance: Number.POSITIVE_INFINITY,
@@ -245,8 +249,8 @@ export default class DrawTool {
     this.scene.requestRender();
   }
 
-  #handleSize() {
-    const pixelSize = Math.max(HANDLE_PIXELS * this.handleScale, MIN_HANDLE_PIXELS);
+  #handleSize(shape) {
+    const pixelSize = Math.max(HANDLE_PIXELS * (shape.handleScale ?? 1), MIN_HANDLE_PIXELS);
     return { pixelSize, outlineWidth: (HANDLE_OUTLINE_PIXELS * pixelSize) / HANDLE_PIXELS };
   }
 

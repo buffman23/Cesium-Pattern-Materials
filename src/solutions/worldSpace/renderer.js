@@ -14,6 +14,7 @@ import {
   PolygonHierarchy,
   PolylineMaterialAppearance,
 } from "cesium";
+import { boundingBoxDiagonal, fitMaxHeight } from "../../shared/maxHeight.js";
 import PolylinePatternMaterial from "./PolylinePatternMaterial.js";
 import PolygonPatternMaterial from "./PolygonPatternMaterial.js";
 import {
@@ -56,8 +57,10 @@ export default async function createRenderer(viewer) {
   const rendered = new Map();
   let lineWidth = LINE_WIDTH;
   let stampSpacing = STAMP_SPACING;
-  let maxHeight = Infinity; // camera height above which patterns keep their ground size
-  let heightTransition = 0; // meters below maxHeight over which that eases in
+  // Max camera height per shape (patterns keep their ground size above it), in units of the
+  // shape's fit height (see fitMaxHeight); Infinity = off. Easing starts at fitEaseFrom.
+  let fitFactor = Infinity;
+  let fitEaseFrom = 0;
   let lineImageKey = DEFAULT_LINE_IMAGE; // a key of LINE_IMAGES, or null for no line
   let stampImageKey = DEFAULT_STAMP_IMAGE; // a key of STAMP_IMAGES, or null for no stamps
   const lineImageFor = (key) => (key ? lineImages[key] : null);
@@ -127,18 +130,30 @@ export default async function createRenderer(viewer) {
           lineColor: LINE_COLOR,
           stampColor: STAMP_COLOR,
           spacing: stampSpacing,
-          maxHeight,
-          heightTransition,
         }),
       };
       rendered.set(shape.id, state);
     }
     state.positions = shape.positions.slice();
+    state.diagonal = boundingBoxDiagonal(state.positions);
     buildPolyline(state);
+  }
+
+  // A shape's max height, fitted to its bounding box (refreshed every frame, as it depends on
+  // the camera's field of view).
+  function applyMaxHeight(state) {
+    const values = fitMaxHeight(state.diagonal, scene.camera, fitFactor, fitEaseFrom);
+    for (const material of [state.material, state.polygonMaterial]) {
+      if (material) {
+        material.maxHeight = values.maxHeight;
+        material.heightTransition = values.heightTransition;
+      }
+    }
   }
 
   function buildPolyline(state) {
     PolylinePatternMaterial.setPositions(state.material, state.positions, lineWidth);
+    applyMaxHeight(state);
     PolylinePatternMaterial.updateCamera(state.material, scene);
     replace(state, "primitive", groundLine(state.positions, lineWidth, state.material));
   }
@@ -151,15 +166,15 @@ export default async function createRenderer(viewer) {
           image: hatchImage,
           color: HATCH_COLOR,
           tileSize: HATCH_TILE_PIXELS,
-          maxHeight,
-          heightTransition,
         }),
       };
       rendered.set(shape.id, state);
     }
     state.shape = shape;
     const positions = shape.positions;
+    state.diagonal = boundingBoxDiagonal(positions);
     PolygonPatternMaterial.setOrigin(state.polygonMaterial, positions);
+    applyMaxHeight(state);
     PolygonPatternMaterial.updateCamera(state.polygonMaterial, scene);
 
     replace(
@@ -204,6 +219,7 @@ export default async function createRenderer(viewer) {
   // Both patterns need the current camera every frame (precision at close zoom, zoom fades).
   const removePreRender = scene.preRender.addEventListener(() => {
     for (const state of rendered.values()) {
+      applyMaxHeight(state);
       if (state.polygonMaterial) {
         PolygonPatternMaterial.updateCamera(state.polygonMaterial, scene);
       }
@@ -255,20 +271,15 @@ export default async function createRenderer(viewer) {
       }
     },
     /**
-     * Sets the camera height (meters, Infinity = off) above which both patterns keep their
-     * ground size, and the meters below it over which that eases in. Read by the materials'
-     * updateCamera, so no rebuild needed.
+     * Sets the max camera height above which both patterns keep their ground size, per shape
+     * in units of its fit height (see fitMaxHeight; Infinity = off), and where easing into it
+     * starts, in the same units. Read by the materials' updateCamera, so no rebuild needed.
      */
-    setMaxHeight({ maxHeight: height = maxHeight, heightTransition: transition = heightTransition } = {}) {
-      maxHeight = height;
-      heightTransition = transition;
+    setMaxHeight({ factor = fitFactor, easeFrom = fitEaseFrom } = {}) {
+      fitFactor = factor;
+      fitEaseFrom = easeFrom;
       for (const state of rendered.values()) {
-        for (const material of [state.material, state.polygonMaterial]) {
-          if (material) {
-            material.maxHeight = maxHeight;
-            material.heightTransition = heightTransition;
-          }
-        }
+        applyMaxHeight(state);
       }
     },
     /** Sets the stamp spacing multiplier (1 = touching); a uniform, so no rebuild needed. */
