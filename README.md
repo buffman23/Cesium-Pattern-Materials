@@ -122,7 +122,6 @@ PolylinePatternMaterial.create({
   stampImage,         // a symbol on a transparent background; null = no stamps
   lineColor, stampColor,
   spacing: 1,         // stamp repeat as a multiple of the stamp length (0.25-4)
-  vertexMode: PolylinePatternMaterial.VertexMode.CLIP,
 });
 PolylinePatternMaterial.setImages(material, { lineImage, stampImage });   // change later
 ```
@@ -174,19 +173,15 @@ repeat lengths apart. Odd-indexed stamps fade out as the level approaches the ne
   is therefore whole and has a single orientation, never torn. It's only visible inside the
   line's footprint (the draped bands plus the wedges), so symbols should be no taller than the
   line width.
-- **The wedge** is detected by `st.s` not changing between neighboring pixels. When zoomed in
-  close, it's detected by the pixel falling outside its segment.
+- **The wedge** (and the part of the band past the vertex) is detected exactly per pixel: the
+  pixel lies beyond the vertex along its own segment's direction.
 
-**Stamps at vertices** (`vertexMode`, `PolylinePatternMaterial.VertexMode`; the demo's
-**Stamps at vertices** combobox):
-
-| mode | behaviour | trade-off |
-|---|---|---|
-| `SKIP` | Global grid. Stamps that would reach past a vertex or line end are left out. | The gap at a vertex depends on where the grid falls. |
-| `CLIP` (default) | Global grid. Stamps near a vertex are kept and reach past it (drawn whole by the overflow pass), except at the line's two ends, where nothing exists beyond to draw on. | A stamp may sit over a corner, pointing along its own segment. |
-| `SNAP` | Stamps at the evenly divided points `i / n` of each segment, with `n` a power of two so zoom levels nest. | The gap at a vertex equals the interior spacing. |
-| `FIT` | Per segment, the first and last stamp touch the vertices. | Stamps shift slightly while zooming, because their ground length changes with zoom. |
-| `CORNER` | `SKIP`, plus one stamp centred on each interior vertex along the corner's mean direction. | On a 90° corner an X looks rotated 45°. |
+**Where stamps go.** The stamp grid starts at the first vertex: the first stamp's leading edge
+touches it at every zoom. Stamps near an interior vertex are kept and reach past it, drawn whole
+by the overflow pass, so a stamp may sit over a corner, pointing along its own segment. The
+pattern runs all the way to the last vertex, which cuts off the final stamp (nothing exists
+beyond to draw on); moving the last vertex can make the line finish with a whole stamp. While
+zooming, all stamps shift together by up to half a stamp, staying pinned at the start.
 
 Vertex distances come from a small float texture, searched with a binary search, so there's no
 vertex limit. Zoomed in close, the shader instead uses the reference points' segment ranges
@@ -374,6 +369,8 @@ Roughly in the order they came up. Each explains why the code looks the way it d
       its own segment's frame, from per-vertex frames, wherever it reaches.
     - **Rejected along the way:** stretching one copy of the line per segment, which distorts
       with segment length; and subtracting a stamp's line to isolate its symbol.
+    - **One mode:** with the two images, clip (grid from the first vertex, cut at the last) was
+      kept and the skip, snap, fit and corner modes were removed.
 
 11. **Testing pitfalls.**
     - Headless Chrome's software renderer, SwiftShader, didn't show the precision bugs. Tests

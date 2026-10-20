@@ -30,6 +30,13 @@ const viewer = new Viewer("cesiumContainer", {
   // tile loads request frames themselves; changes made by this app call requestRender().
   requestRenderMode: true,
   maximumRenderTimeChange: Infinity,
+  // No MSAA: with it, ground-clamped lines (GroundPolylinePrimitive) lose scattered pixels to
+  // Cesium's depth-based tests at large distances and look torn, even with a plain color
+  // material. The patterns are smoothed by their own texture filtering anyway.
+  msaaSamples: 1,
+  // 3D only: primitives then skip building 2D / Columbus-view geometry, which roughly halves
+  // the cost of rebuilding shapes while editing.
+  scene3DOnly: true,
 });
 viewer.scene.globe.depthTestAgainstTerrain = false;
 const requestRender = () => viewer.scene.requestRender();
@@ -69,7 +76,6 @@ async function useSolution(id) {
   renderer = created;
   renderer.setLineWidth?.(lineWidth);
   renderer.setStampSpacing?.(stampSpacing);
-  renderer.setVertexMode?.(vertexMode);
   renderer.setImages?.({ line: lineImage, stamp: stampImage });
   // Re-render the existing shapes with the newly selected solution.
   for (const shape of drawTool.shapes) {
@@ -142,19 +148,6 @@ stampSpacingInput.addEventListener("input", () =>
   setStampSpacing(2 ** Number(stampSpacingInput.value)),
 );
 
-// --- Vertex mode combobox (PolylinePatternMaterial.VertexMode values) ------------------------
-const vertexModeSelect = document.getElementById("vertexMode");
-let vertexMode = Number(vertexModeSelect.value);
-
-function setVertexMode(value) {
-  vertexMode = value;
-  vertexModeSelect.value = String(value);
-  renderer?.setVertexMode?.(value);
-  requestRender();
-}
-
-vertexModeSelect.addEventListener("change", () => setVertexMode(Number(vertexModeSelect.value)));
-
 // --- Line / stamp image comboboxes ("" = none) ----------------------------------------------
 const lineImageSelect = document.getElementById("lineImage");
 const stampImageSelect = document.getElementById("stampImage");
@@ -219,7 +212,6 @@ function exportState() {
     solution: select.value,
     lineWidth,
     stampSpacing,
-    vertexMode,
     lineImage,
     stampImage,
     canvas: [viewer.canvas.clientWidth, viewer.canvas.clientHeight],
@@ -262,9 +254,6 @@ async function importState(json) {
   }
   if (state.stampSpacing) {
     setStampSpacing(state.stampSpacing);
-  }
-  if (state.vertexMode !== undefined) {
-    setVertexMode(state.vertexMode);
   }
   if (state.lineImage !== undefined || state.stampImage !== undefined) {
     setImages({ line: state.lineImage, stamp: state.stampImage });

@@ -40,9 +40,9 @@ import mipmapTexture from "../../shared/mipmapTexture.js";
 //    reaches past a vertex: near a vertex the stamps of both segments meeting there are drawn
 //    from per-vertex frames (eye-space position, incoming / outgoing direction, up) uploaded by
 //    the CPU every frame, so a stamp over a corner is whole, not torn. It can only show inside
-//    the line's footprint (the draped bands plus the corner wedges).
-//
-// Where stamp centres go is set by `vertexMode` (see PolylinePatternMaterial.VertexMode).
+//    the line's footprint (the draped bands plus the corner wedges). The stamp grid starts at
+//    the first vertex (the first stamp touches it) and runs up to the last vertex, which cuts
+//    off the final stamp; moving the last vertex can make the line finish with a whole stamp.
 //
 // Precision: st.s is a float32 fraction of the whole line, so distance along the line is only
 // resolved to lineLength * 2^-24 (22 cm on a 3,600 km line). Zoomed in close, stamps would
@@ -56,18 +56,12 @@ const source = /* glsl */ `
 in float v_width;               // line width in pixels, provided by GroundPolylinePrimitive
 
 const float MIN_SPACING = 0.25; // below 1, stamps overlap; see stampsAt
-const float MODE_SKIP = 0.0;
-const float MODE_CLIP = 1.0;
-const float MODE_SNAP = 2.0;
-const float MODE_FIT = 3.0;
-const float MODE_CORNER = 4.0;
 
 uniform sampler2D lineImage;    // 1x1 placeholder = no line layer (null, or still loading)
 uniform sampler2D stampImage;   // 1x1 placeholder = no stamps
 uniform vec4 lineColor;
 uniform vec4 stampColor;
 uniform float spacing;          // stamp repeat as a multiple of the stamp length (>= 0.25)
-uniform float vertexMode;       // one of the MODE_* values
 uniform float lineLength;
 uniform float preciseMetersPerPixel;
 uniform vec4 referenceA;        // xyz: point on the line (eye coords), w: distance mod modulus
@@ -147,38 +141,6 @@ vec4 lineAt(float along, float t, float a, float b, float metersPerPixel)
     return tinted(mix(coarse, fine, blend), lineColor);
 }
 
-// Stamp centres for the segment [a, b]: origin + i * stampStep for whole i in [first, last].
-void stampLayout(float a, float b, float gridSpacing, float stampMeters, out float origin,
-                 out float stampStep, out float first, out float last)
-{
-    // Global grid: the stamps whose centre lies in [a, b).
-    origin = 0.0;
-    stampStep = gridSpacing;
-    first = ceil(a / gridSpacing);
-    last = ceil(b / gridSpacing) - 1.0;
-    if (vertexMode == MODE_SNAP || vertexMode == MODE_FIT) {
-        float segmentLength = b - a;
-        float available = vertexMode == MODE_FIT ? segmentLength - stampMeters : segmentLength;
-        // Power-of-two divisions, so the next zoom level's stamps are a subset of these.
-        float divisions = available >= gridSpacing ? exp2(floor(log2(available / gridSpacing))) : 0.0;
-        if (vertexMode == MODE_SNAP) {
-            origin = a;                                     // interior division points
-            stampStep = segmentLength / max(divisions, 1.0);
-            first = 1.0;
-            last = divisions - 1.0;
-        } else if (divisions > 0.0) {
-            origin = a + 0.5 * stampMeters;                 // first stamp touches the start,
-            stampStep = available / divisions;              // last one touches the end
-            first = 0.0;
-            last = divisions;
-        } else {
-            origin = 0.5 * (a + b);                         // room for one stamp at most
-            first = 0.0;
-            last = available >= 0.0 ? 0.0 : -1.0;
-        }
-    }
-}
-
 // The stamps of the segment [a, b] at "along" meters along the line, "t" across it.
 // lineEnds: x = 1 if the segment starts the line, y = 1 if it ends it (nothing is drawn beyond
 // those, so stamps can't reach past them).
@@ -189,39 +151,43 @@ vec4 stampsAt(float along, float t, float a, float b, vec2 lineEnds, float gridS
     if (t <= 0.0 || t >= 1.0) {
         return result;
     }
-    float origin;
-    float stampStep;
-    float first;
-    float last;
-    stampLayout(a, b, gridSpacing, stampMeters, origin, stampStep, first, last);
+    // Stamp centres: origin + i * gridSpacing. The grid is anchored so the first stamp's leading
+    // edge touches the start of the line (distance 0, which is also 0 modulo the close-zoom
+    // modulus); the stamps shift together by up to half a stamp as the stamp's ground length
+    // changes with zoom. The segment owns the stamps whose centre lies in [a, b).
+    float halfStamp = 0.5 * stampMeters;
+    float origin = halfStamp;
+    float first = ceil((a - origin) / gridSpacing);
+    float last = ceil((b - origin) / gridSpacing) - 1.0;
+    if (lineEnds.y > 0.5) {
+        // The line's last segment also owns the stamps that start before its end but are
+        // centred beyond it, so the pattern runs all the way to the last vertex, which cuts the
+        // final stamp off (nothing is drawn past the end of the line).
+        last = ceil((b + halfStamp - origin) / gridSpacing) - 1.0;
+    }
     if (first > last) {
         return result;
     }
-    float halfStamp = 0.5 * stampMeters;
     // The nearest stamp and, for spacing < 1 where stamps overlap, two neighbours either side.
-    float nearest = clamp(floor((along - origin) / stampStep + 0.5), first, last);
+    float nearest = clamp(floor((along - origin) / gridSpacing + 0.5), first, last);
     for (int j = -2; j <= 2; j++) {
         float i = nearest + float(j);
         if (i < first || i > last) {
             continue;
         }
-        float center = origin + i * stampStep;
+        float center = origin + i * gridSpacing;
         float u = 0.5 + (along - center) / stampMeters;
         if (u <= 0.0 || u >= 1.0) {
             continue;
         }
         // Every second stamp fades out as the spacing level approaches the next power of two.
         float keep = mod(i, 2.0) < 0.5 ? 1.0 : 1.0 - fadeOut;
-        if (vertexMode == MODE_SKIP || vertexMode == MODE_SNAP || vertexMode == MODE_CORNER) {
-            // Leave out stamps that would reach past a vertex (fading over the last 20%).
-            keep *= smoothstep(halfStamp, 1.2 * halfStamp, min(center - a, b - center));
-        } else if (vertexMode == MODE_CLIP) {
-            // Stamps may reach past an interior vertex (the next segment draws the rest), but
-            // not past the line's own ends.
-            float startGap = lineEnds.x > 0.5 ? center - a : 1e30;
-            float endGap = lineEnds.y > 0.5 ? b - center : 1e30;
-            keep *= smoothstep(halfStamp, 1.2 * halfStamp, min(startGap, endGap));
-        }
+        // Stamps may reach past an interior vertex (the next segment draws the rest) and are cut
+        // off at the last vertex, but must not overhang the first one: with spacing < 1 the grid
+        // has stamps before its first whole one. A stamp exactly touching the start is kept
+        // whole; one overhanging fades out over a tenth of a half stamp.
+        float startGap = lineEnds.x > 0.5 ? center - a : 1e30;
+        keep *= smoothstep(0.9 * halfStamp, halfStamp, startGap);
         if (keep > 0.0) {
             result = over(tinted(textureLod(stampImage, vec2(u, t), lod), stampColor) * keep, result);
         }
@@ -239,10 +205,6 @@ czm_material czm_getMaterial(czm_materialInput materialInput)
     if (!hasLine && !hasStamp) {
         discard;
     }
-
-    // In the mitered wedge outside a corner st.s is clamped to the vertex, so it doesn't change
-    // from pixel to pixel. (Derivatives must be taken here, in uniform control flow.)
-    float sChange = abs(dFdx(materialInput.st.s)) + abs(dFdy(materialInput.st.s));
 
     float d = materialInput.st.s * lineLength;     // meters along the line
 
@@ -274,7 +236,7 @@ czm_material czm_getMaterial(czm_materialInput materialInput)
         preciseLineEnds = useA ? lineEndsA : lineEndsB;
     }
 
-    // The segment this fragment is on, and whether it is in a corner's mitered wedge.
+    // The segment this fragment is on.
     float segmentStart = 0.0;
     float segmentEnd = lineLength;
     vec2 lineEnds = vec2(1.0);
@@ -289,7 +251,6 @@ czm_material czm_getMaterial(czm_materialInput materialInput)
         segmentEnd = vertexDistanceAt(segment + 1);
         lineEnds = vec2(segment == 0 ? 1.0 : 0.0, segment + 2 >= int(vertexCount) ? 1.0 : 0.0);
     }
-    bool wedge = precise ? (d < segmentStart || d > segmentEnd) : sChange == 0.0;
     float t = materialInput.st.t;
 
     vec4 result = vec4(0.0);
@@ -305,18 +266,13 @@ czm_material czm_getMaterial(czm_materialInput materialInput)
         float level = log2(repeatMeters);                 // 2^level m == one repeat on screen
         float k = ceil(level);
         float gridSpacing = exp2(k);                      // 1x..2x the repeat length
-        float fadeOut = smoothstep(0.5, 1.0, 1.0 - (k - level));
+        // Every second stamp fades out over the last 10% of the level before the spacing doubles:
+        // short enough that half-faded "ghost" stamps are rarely seen, long enough not to pop.
+        float fadeOut = smoothstep(0.9, 1.0, 1.0 - (k - level));
         // Explicit mip level (u jumps between stamps): one stamp spans this many device pixels.
         float lod = max(log2(stampSize.x * metersPerPixel / (stampMeters * czm_pixelRatio)), 0.0);
 
-        // This segment's stamps, measured along the line (not in the wedge: d is clamped there).
-        if (!wedge) {
-            result = over(stampsAt(d, t, segmentStart, segmentEnd, lineEnds, gridSpacing,
-                                   fadeOut, stampMeters, lod), result);
-        }
-
-        // Near an interior vertex: stamps reaching across it, measured in their own segment's
-        // frame from the vertex position and directions (also covers the wedge).
+        // The nearest interior vertex, with its position and directions (eye coordinates).
         bool haveVertex = false;
         vec3 vertexPosition = vec3(0.0);
         vec3 incoming = vec3(1.0, 0.0, 0.0);
@@ -357,36 +313,39 @@ czm_material czm_getMaterial(czm_materialInput materialInput)
                 afterEndsLine = v + 2 >= int(vertexCount);
             }
         }
+        // Past the vertex along this fragment's own segment (the corner's mitered wedge, and the
+        // part of the band beyond the vertex), GroundPolylinePrimitive clamps st.s to the vertex,
+        // so d can't place stamps there. Tested exactly per pixel from the fragment's position;
+        // a screen-space test of st.s changing would misclassify 2x2 pixel quads at the edge.
+        vec3 offset = eyeCoordinate.xyz - vertexPosition;
+        bool vertexAtEnd = abs(dv - segmentEnd) <= abs(dv - segmentStart);
+        bool pastOwnEnd = haveVertex
+            && (vertexAtEnd ? dot(offset, incoming) > 0.0 : dot(offset, outgoing) < 0.0);
+
+        // This segment's stamps, measured along the line.
+        if (!pastOwnEnd) {
+            result = over(stampsAt(d, t, segmentStart, segmentEnd, lineEnds, gridSpacing,
+                                   fadeOut, stampMeters, lod), result);
+        }
+
+        // Near an interior vertex: stamps reaching across it, measured in their own segment's
+        // frame from the vertex position and directions. That adds the other segment's stamps
+        // and, past the vertex, this segment's too.
         float reach = 0.5 * stampMeters + width;
-        if (haveVertex && (wedge || abs(d - dv) < reach)) {
-            vec3 offset = eyeCoordinate.xyz - vertexPosition;
-            // Which side of the vertex this fragment's own segment is on. Its stamps were drawn
-            // above (except in the wedge); add the other segment's.
-            bool vertexAtEnd = abs(dv - segmentEnd) <= abs(dv - segmentStart);
-            if (wedge || !vertexAtEnd) {
+        if (haveVertex && (pastOwnEnd || abs(d - dv) < reach)) {
+            if (pastOwnEnd || !vertexAtEnd) {
                 float along = dv + dot(offset, incoming);
                 float across = 0.5 + dot(offset, normalize(cross(incoming, up))) / width;
                 result = over(stampsAt(along, across, dv - lengthBefore, dv,
                                        vec2(beforeStartsLine ? 1.0 : 0.0, 0.0), gridSpacing,
                                        fadeOut, stampMeters, lod), result);
             }
-            if (wedge || vertexAtEnd) {
+            if (pastOwnEnd || vertexAtEnd) {
                 float along = dv + dot(offset, outgoing);
                 float across = 0.5 + dot(offset, normalize(cross(outgoing, up))) / width;
                 result = over(stampsAt(along, across, dv, dv + lengthAfter,
                                        vec2(0.0, afterEndsLine ? 1.0 : 0.0), gridSpacing,
                                        fadeOut, stampMeters, lod), result);
-            }
-            if (vertexMode == MODE_CORNER) {
-                // One more stamp centred on the vertex, along the corner's mean direction.
-                vec3 axis = incoming + outgoing;
-                axis = length(axis) > 1e-3 ? normalize(axis) : incoming;
-                float cu = 0.5 + dot(offset, axis) / stampMeters;
-                float cv = 0.5 + dot(offset, normalize(cross(axis, up))) / width;
-                if (cu > 0.0 && cu < 1.0 && cv > 0.0 && cv < 1.0) {
-                    result = over(tinted(textureLod(stampImage, vec2(cu, cv), lod), stampColor),
-                                  result);
-                }
             }
         }
     }
@@ -408,25 +367,6 @@ const MIN_SPACING = 0.25;
 const REFINE_ITERATIONS = 3;
 
 /**
- * Where stamp centres go relative to the vertices (corners and the line's two ends). In every
- * mode a stamp belongs to the segment containing its centre and is drawn whole, in that
- * segment's direction, even where it reaches past a vertex.
- * @enum {number}
- */
-const VertexMode = Object.freeze({
-  /** Global stamp grid; stamps that would reach past a vertex are left out. */
-  SKIP: 0,
-  /** Global stamp grid; stamps near a vertex are kept and reach past it (default). */
-  CLIP: 1,
-  /** Stamps at evenly divided points of each segment; vertex gaps equal the interior spacing. */
-  SNAP: 2,
-  /** Per segment, the first and last stamp touch the vertices (shift slightly while zooming). */
-  FIT: 3,
-  /** SKIP plus one stamp centred on every interior vertex, along the corner's mean direction. */
-  CORNER: 4,
-});
-
-/**
  * Material that draws a patterned line with optional symbols on top, along a ground-clamped
  * polyline. It must be rendered with GroundPolylinePrimitive + GroundPolylineGeometry +
  * PolylineMaterialAppearance: the shader relies on that primitive's st.s (arc length along the
@@ -440,7 +380,6 @@ const VertexMode = Object.freeze({
  */
 export default class PolylinePatternMaterial {
   static TYPE = "PolylinePatternWorld";
-  static VertexMode = VertexMode;
 
   /**
    * @param {object} options
@@ -453,8 +392,6 @@ export default class PolylinePatternMaterial {
    * @param {Color} [options.stampColor=Color.WHITE] Tint multiplied with the stamp image.
    * @param {number} [options.spacing=1] Distance between stamps as a multiple of the stamp
    *   length (1 = touching, down to 0.25 = overlapping). Changeable via `material.uniforms.spacing`.
-   * @param {VertexMode} [options.vertexMode=VertexMode.CLIP] Where stamps go near vertices.
-   *   Changeable via `material.uniforms.vertexMode`.
    * @returns {Material}
    */
   static create({
@@ -463,7 +400,6 @@ export default class PolylinePatternMaterial {
     lineColor = Color.WHITE,
     stampColor = Color.WHITE,
     spacing = 1,
-    vertexMode = VertexMode.CLIP,
   } = {}) {
     const material = new Material({
       fabric: {
@@ -474,7 +410,6 @@ export default class PolylinePatternMaterial {
           lineColor,
           stampColor,
           spacing,
-          vertexMode,
           lineLength: 1,
           preciseMetersPerPixel: 0,
           referenceA: new Cartesian4(),

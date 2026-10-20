@@ -1,5 +1,9 @@
 import {
+  BoundingSphere,
+  Cartesian3,
+  Math as CesiumMath,
   Color,
+  Ellipsoid,
   GeometryInstance,
   GroundPolylineGeometry,
   GroundPolylinePrimitive,
@@ -52,17 +56,51 @@ export default async function createRenderer(viewer) {
   const rendered = new Map();
   let lineWidth = LINE_WIDTH;
   let stampSpacing = STAMP_SPACING;
-  let vertexMode = PolylinePatternMaterial.VertexMode.CLIP;
   let lineImageKey = DEFAULT_LINE_IMAGE; // a key of LINE_IMAGES, or null for no line
   let stampImageKey = DEFAULT_STAMP_IMAGE; // a key of STAMP_IMAGES, or null for no stamps
   const lineImageFor = (key) => (key ? lineImages[key] : null);
   const stampImageFor = (key) => (key ? stampImages[key] : null);
 
+  // Geometry detail scales with the shape's size, so rebuilding it (every drag step) costs about
+  // the same for a city as for a continent. Cesium otherwise subdivides lines every 10 km and
+  // polygons on a 1 degree grid, which made editing continent-sized shapes lag.
+  const detail = {
+    lineSegments: 256, // target number of pieces per line
+    minLineGranularity: 9999, // meters (Cesium's default; finer than this isn't needed)
+    maxLineGranularity: 200000, // meters; coarser pieces sag too far below the curved ground
+    polygonCells: 32, // target number of grid cells across a polygon
+    minPolygonGranularity: CesiumMath.RADIANS_PER_DEGREE, // Cesium's default
+    maxPolygonGranularity: 5 * CesiumMath.RADIANS_PER_DEGREE,
+  };
+  const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
+  function lineGranularity(positions, loop) {
+    let length = 0;
+    for (let i = 1; i < positions.length; i++) {
+      length += Cartesian3.distance(positions[i - 1], positions[i]);
+    }
+    if (loop && positions.length > 2) {
+      length += Cartesian3.distance(positions[positions.length - 1], positions[0]);
+    }
+    return clamp(length / detail.lineSegments, detail.minLineGranularity, detail.maxLineGranularity);
+  }
+
+  function polygonGranularity(positions) {
+    const radius = BoundingSphere.fromPoints(positions).radius;
+    const extent = (2 * radius) / Ellipsoid.WGS84.maximumRadius; // radians across
+    return clamp(extent / detail.polygonCells, detail.minPolygonGranularity, detail.maxPolygonGranularity);
+  }
+
   function groundLine(positions, width, material, loop = false) {
     return primitives.add(
       new GroundPolylinePrimitive({
         geometryInstances: new GeometryInstance({
-          geometry: new GroundPolylineGeometry({ positions, width, loop }),
+          geometry: new GroundPolylineGeometry({
+            positions,
+            width,
+            loop,
+            granularity: lineGranularity(positions, loop),
+          }),
         }),
         appearance: new PolylineMaterialAppearance({ material }),
         asynchronous: false,
@@ -87,7 +125,6 @@ export default async function createRenderer(viewer) {
           lineColor: LINE_COLOR,
           stampColor: STAMP_COLOR,
           spacing: stampSpacing,
-          vertexMode,
         }),
       };
       rendered.set(shape.id, state);
@@ -114,6 +151,7 @@ export default async function createRenderer(viewer) {
       };
       rendered.set(shape.id, state);
     }
+    state.shape = shape;
     const positions = shape.positions;
     PolygonPatternMaterial.setOrigin(state.polygonMaterial, positions);
     PolygonPatternMaterial.updateCamera(state.polygonMaterial, scene.camera);
@@ -127,6 +165,7 @@ export default async function createRenderer(viewer) {
             geometry: new PolygonGeometry({
               polygonHierarchy: new PolygonHierarchy(positions),
               vertexFormat: MaterialAppearance.MaterialSupport.TEXTURED.vertexFormat,
+              granularity: polygonGranularity(positions),
             }),
           }),
           appearance: new MaterialAppearance({
@@ -197,6 +236,17 @@ export default async function createRenderer(viewer) {
         }
       }
     },
+    /** Overrides geometry detail settings (see `detail`) and rebuilds every shape. */
+    setDetail(settings) {
+      Object.assign(detail, settings);
+      for (const state of rendered.values()) {
+        if (state.material) {
+          buildPolyline(state);
+        } else if (state.shape) {
+          updatePolygon(state.shape);
+        }
+      }
+    },
     /** Sets the stamp spacing multiplier (1 = touching); a uniform, so no rebuild needed. */
     setStampSpacing(spacing) {
       stampSpacing = spacing;
@@ -223,15 +273,6 @@ export default async function createRenderer(viewer) {
             lineImage: lineImageFor(lineImageKey),
             stampImage: stampImageFor(stampImageKey),
           });
-        }
-      }
-    },
-    /** Sets how stamps behave at vertices (a PolylinePatternMaterial.VertexMode value). */
-    setVertexMode(mode) {
-      vertexMode = mode;
-      for (const state of rendered.values()) {
-        if (state.material) {
-          state.material.uniforms.vertexMode = mode;
         }
       }
     },

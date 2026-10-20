@@ -61,18 +61,13 @@ body,
 
 #solutionSelect,
 #lineImage,
-#stampImage,
-#vertexMode {
+#stampImage {
   width: 100%;
   padding: 4px;
   border: 1px solid #666;
   border-radius: 4px;
   background: #3a3a3a;
   color: #eee;
-}
-
-#vertexMode {
-  margin-bottom: 8px;
 }
 
 #solutionDescription {

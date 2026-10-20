@@ -6,10 +6,12 @@ import { Material, Sampler, TextureMinificationFilter, TextureWrap } from "cesiu
  * material's update so that, once the image texture has loaded, mipmaps are generated and a
  * trilinear sampler with the requested wrap modes is applied.
  *
- * Relies on the private `Material._textures` map; revisit if Cesium changes it.
+ * Relies on the private `Material._textures` map and `_loadedImages` queue; revisit if Cesium
+ * changes them.
  *
  * It also keeps `material.loadingImages`, the set of image uniforms whose image is set but not
- * on the GPU yet. Material only turns a loaded image into a texture on a later update, so with
+ * on the GPU yet (including a swap from one image to another, during which the old texture is
+ * still bound). Material only turns a loaded image into a texture on a later update, so with
  * the scene's requestRenderMode on, the caller must keep requesting frames while this set is
  * not empty, or the image never appears until the camera moves.
  *
@@ -33,7 +35,10 @@ export default function mipmapTexture(
     const texture = material._textures[uniformName];
     const value = material.uniforms[uniformName];
     const hasImage = value !== undefined && value !== null && value !== Material.DefaultImageId;
-    if (hasImage && (!texture || texture === context.defaultTexture)) {
+    // A new image waits in the private `_loadedImages` queue for the next update; meanwhile the
+    // old texture (or the placeholder) is still bound.
+    const queued = material._loadedImages.some((loaded) => loaded.id === uniformName);
+    if (queued || (hasImage && (!texture || texture === context.defaultTexture))) {
       material.loadingImages.add(uniformName);
     } else {
       material.loadingImages.delete(uniformName);
