@@ -26,8 +26,13 @@ const viewer = new Viewer("cesiumContainer", {
   fullscreenButton: false,
   infoBox: false,
   selectionIndicator: false,
+  // Render only when something changes, instead of every animation frame. Camera moves and
+  // tile loads request frames themselves; changes made by this app call requestRender().
+  requestRenderMode: true,
+  maximumRenderTimeChange: Infinity,
 });
 viewer.scene.globe.depthTestAgainstTerrain = false;
+const requestRender = () => viewer.scene.requestRender();
 viewer.camera.setView({
   destination: Cartesian3.fromDegrees(-104.99, 39.74, 15000),
 });
@@ -72,6 +77,7 @@ async function useSolution(id) {
       renderer.update(shape);
     }
   }
+  requestRender();
 }
 
 // --- Draw tool + toolbar -------------------------------------------------------------------
@@ -82,8 +88,14 @@ const buttons = {
 };
 
 const drawTool = new DrawTool(viewer, {
-  onChange: (shape) => renderer?.update(shape),
-  onRemove: (shape) => renderer?.remove(shape),
+  onChange: (shape) => {
+    renderer?.update(shape);
+    requestRender();
+  },
+  onRemove: (shape) => {
+    renderer?.remove(shape);
+    requestRender();
+  },
   onHint: (text) => {
     hint.textContent = text;
     const activeType = drawTool?.active?.type;
@@ -108,6 +120,7 @@ lineWidthInput.addEventListener("input", () => {
   lineWidth = Number(lineWidthInput.value);
   lineWidthValue.textContent = `${lineWidth} px`;
   renderer?.setLineWidth?.(lineWidth);
+  requestRender();
 });
 
 // --- Stamp spacing slider ------------------------------------------------------------------
@@ -121,6 +134,7 @@ function setStampSpacing(value) {
   stampSpacingInput.value = String(Math.log2(value));
   stampSpacingValue.textContent = `${value.toFixed(2)}×`;
   renderer?.setStampSpacing?.(value);
+  requestRender();
 }
 
 setStampSpacing(stampSpacing);
@@ -136,6 +150,7 @@ function setVertexMode(value) {
   vertexMode = value;
   vertexModeSelect.value = String(value);
   renderer?.setVertexMode?.(value);
+  requestRender();
 }
 
 vertexModeSelect.addEventListener("change", () => setVertexMode(Number(vertexModeSelect.value)));
@@ -152,6 +167,7 @@ function setImages({ line = lineImage, stamp = stampImage } = {}) {
   lineImageSelect.value = line ?? "";
   stampImageSelect.value = stamp ?? "";
   renderer?.setImages?.({ line, stamp });
+  requestRender();
 }
 
 lineImageSelect.addEventListener("change", () => setImages({ line: lineImageSelect.value || null }));
@@ -267,6 +283,7 @@ async function importState(json) {
       orientation: { heading: c.heading, pitch: c.pitch, roll: c.roll },
     });
   }
+  requestRender();
   const [width, height] = state.canvas ?? [];
   if (width && (width !== viewer.canvas.clientWidth || height !== viewer.canvas.clientHeight)) {
     console.log(

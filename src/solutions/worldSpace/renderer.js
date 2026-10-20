@@ -142,6 +142,19 @@ export default async function createRenderer(viewer) {
     replace(state, "outline", groundLine(positions, 2, outlineMaterial, true));
   }
 
+  // The scene renders on demand (requestRenderMode). While any pattern image is still being
+  // turned into a texture, keep requesting frames so it appears without moving the camera.
+  const removePostRender = scene.postRender.addEventListener(() => {
+    for (const state of rendered.values()) {
+      for (const material of [state.material, state.polygonMaterial]) {
+        if (material?.loadingImages?.size > 0) {
+          scene.requestRender();
+          return;
+        }
+      }
+    }
+  });
+
   // Both patterns need the current camera every frame (precision at close zoom).
   const removePreRender = scene.preRender.addEventListener(() => {
     for (const state of rendered.values()) {
@@ -227,6 +240,7 @@ export default async function createRenderer(viewer) {
         remove({ id });
       }
       removePreRender();
+      removePostRender();
       outlineMaterial.destroy();
     },
   };

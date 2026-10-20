@@ -1,4 +1,4 @@
-import { Sampler, TextureMinificationFilter, TextureWrap } from "cesium";
+import { Material, Sampler, TextureMinificationFilter, TextureWrap } from "cesium";
 
 /**
  * Cesium's Material uploads image uniforms without mipmaps, so a detailed pattern tile that
@@ -7,6 +7,11 @@ import { Sampler, TextureMinificationFilter, TextureWrap } from "cesium";
  * trilinear sampler with the requested wrap modes is applied.
  *
  * Relies on the private `Material._textures` map; revisit if Cesium changes it.
+ *
+ * It also keeps `material.loadingImages`, the set of image uniforms whose image is set but not
+ * on the GPU yet. Material only turns a loaded image into a texture on a later update, so with
+ * the scene's requestRenderMode on, the caller must keep requesting frames while this set is
+ * not empty, or the image never appears until the camera moves.
  *
  * @param {Material} material
  * @param {string} uniformName Name of the sampler2D uniform holding the image.
@@ -21,10 +26,18 @@ export default function mipmapTexture(
 ) {
   const originalUpdate = material.update.bind(material);
   let mipmapped;
+  material.loadingImages ??= new Set();
 
   material.update = function (context) {
     originalUpdate(context);
     const texture = material._textures[uniformName];
+    const value = material.uniforms[uniformName];
+    const hasImage = value !== undefined && value !== null && value !== Material.DefaultImageId;
+    if (hasImage && (!texture || texture === context.defaultTexture)) {
+      material.loadingImages.add(uniformName);
+    } else {
+      material.loadingImages.delete(uniformName);
+    }
     if (!texture || texture === context.defaultTexture || texture === mipmapped) {
       return;
     }

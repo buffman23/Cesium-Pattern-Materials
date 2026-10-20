@@ -21,6 +21,8 @@ let nextShapeId = 0;
  *  - onChange(shape): shape.positions changed (shape = { id, type, positions, complete })
  *  - onRemove(shape): shape was deleted
  *  - onHint(text):    status text for the UI
+ *
+ * Works with the scene's requestRenderMode: it requests a frame whenever it changes its handles.
  */
 export default class DrawTool {
   constructor(viewer, { onChange, onRemove, onHint } = {}) {
@@ -169,6 +171,7 @@ export default class DrawTool {
       const { shape, index } = this.dragging;
       shape.committed[index] = position;
       shape.handles[index].position = position;
+      this.scene.requestRender();
       this.onChange(shape);
       return;
     }
@@ -188,6 +191,7 @@ export default class DrawTool {
       this.dragging = { shape: id.shape, index: id.index };
       this.scene.screenSpaceCameraController.enableInputs = false;
       id.point.color = Color.YELLOW;
+      this.scene.requestRender();
     }
   }
 
@@ -199,6 +203,7 @@ export default class DrawTool {
     shape.handles[index].color = Color.WHITE;
     this.dragging = undefined;
     this.scene.screenSpaceCameraController.enableInputs = true;
+    this.scene.requestRender();
   }
 
   #addHandle(shape, index, position) {
@@ -214,6 +219,7 @@ export default class DrawTool {
     });
     id.point = point;
     shape.handles.push(point);
+    this.scene.requestRender();
   }
 
   #notify(shape) {
@@ -228,6 +234,7 @@ export default class DrawTool {
     }
     shape.handles = [];
     this.shapes = this.shapes.filter((s) => s !== shape);
+    this.scene.requestRender();
     this.onRemove(shape);
   }
 }
