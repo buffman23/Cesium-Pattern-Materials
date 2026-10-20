@@ -1,0 +1,97 @@
+@import "cesium/Build/Cesium/Widgets/widgets.css";
+
+html,
+body,
+#cesiumContainer {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  font-family: system-ui, sans-serif;
+}
+
+#toolbar {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  padding: 8px;
+  border-radius: 6px;
+  background: rgba(42, 42, 42, 0.85);
+  color: #eee;
+  max-width: 360px;
+}
+
+#toolbar button {
+  margin: 0 4px 6px 0;
+  padding: 6px 10px;
+  border: 1px solid #666;
+  border-radius: 4px;
+  background: #3a3a3a;
+  color: #eee;
+  cursor: pointer;
+}
+
+#toolbar button.active {
+  background: #2d6cdf;
+  border-color: #6aa0ff;
+}
+
+#hint {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+#toolbar label {
+  display: block;
+  font-size: 12px;
+  margin-bottom: 2px;
+  color: #bbb;
+}
+
+#solutionSelect,
+#vertexMode {
+  width: 100%;
+  padding: 4px;
+  border: 1px solid #666;
+  border-radius: 4px;
+  background: #3a3a3a;
+  color: #eee;
+}
+
+#vertexMode {
+  margin-bottom: 8px;
+}
+
+#solutionDescription {
+  font-size: 12px;
+  line-height: 1.4;
+  color: #bbb;
+  margin: 4px 0 8px;
+}
+
+#toolbar .slider-label {
+  margin-top: 2px;
+}
+
+#lineWidthValue,
+#stampSpacingValue {
+  color: #eee;
+  font-family: ui-monospace, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+#lineWidth,
+#stampSpacing {
+  width: 100%;
+  margin: 0 0 6px;
+}
+
+#cameraHeight {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #555;
+  font-size: 12px;
+  font-family: ui-monospace, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}

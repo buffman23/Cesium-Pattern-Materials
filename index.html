@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cesium Pattern Materials</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="cesiumContainer"></div>
+    <div id="toolbar">
+      <label for="solutionSelect">Shader</label>
+      <select id="solutionSelect"></select>
+      <div id="solutionDescription"></div>
+      <button id="btnPolyline">Draw Polyline</button>
+      <button id="btnPolygon">Draw Polygon</button>
+      <button id="btnClear">Clear</button>
+      <label for="lineWidth" class="slider-label">
+        Line width <span id="lineWidthValue"></span>
+      </label>
+      <input id="lineWidth" type="range" min="2" max="96" step="1" />
+      <label for="stampSpacing" class="slider-label">
+        Stamp spacing <span id="stampSpacingValue"></span>
+      </label>
+      <!-- Logarithmic: value v gives a 2^v multiplier, so 0.25x..4x with 1x in the middle. -->
+      <input id="stampSpacing" type="range" min="-2" max="2" step="0.01" />
+      <label for="vertexMode">At vertices</label>
+      <select id="vertexMode">
+        <option value="0">Skip: no stamps across vertices</option>
+        <option value="1">Clip: stamps cut off at the vertex</option>
+        <option value="2">Snap: even divisions of each segment</option>
+        <option value="3">Fit: stamps touch each vertex</option>
+        <option value="4">Corner: symbol on every corner</option>
+      </select>
+      <div id="hint">Pick a tool to start drawing.</div>
+      <div id="cameraHeight"></div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
