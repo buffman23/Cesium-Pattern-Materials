@@ -599,7 +599,7 @@ pixels wide, and the line looks thinner.
 | `vertexDistances` | `Material.DefaultImageId` | float data texture, one texel per vertex in a single row: distance along the line of each vertex, ascending, both ends included |
 | `vertexCount` | `0` | number of texels in `vertexDistances` |
 | `vertexFrames` | `Material.DefaultImageId` | float data texture, one column per vertex and 4 rows, eye coordinates. Row 0: position, with w = 1 if the vertex is interior. Rows 1, 2, 3: incoming direction, outgoing direction, up. Re-uploaded every frame. |
-| `nearVertex` | `new Cartesian4()` | close-zoom path: the interior vertex nearest the camera. xyz: eye position; w: 0 = none, otherwise 1, plus 2 if the segment before it starts the line, plus 4 if the segment after it ends the line |
+| `nearVertex` | `new Cartesian4()` | close-zoom path: the interior vertex nearest the camera among the ends of reference A's and B's segments. xyz: eye position; w: 0 = none, otherwise 1, plus 2 if the segment before it starts the line, plus 4 if the segment after it ends the line, plus 8 / 16 if it starts / ends reference A's segment, plus 32 / 64 if it starts / ends reference B's |
 | `nearIncoming`, `nearOutgoing` | `new Cartesian4()` | xyz: its incoming / outgoing direction; w: length of the segment before / after |
 | `nearUp` | `new Cartesian4()` | xyz: its up; w: its distance along the line modulo the modulus |
 
@@ -719,7 +719,9 @@ Then `czm_getMaterial` does the following, in order:
      ("off", the distance from the line). Reference B's off is huge if B isn't valid.
    - Use A if its off is at most B's, otherwise B. Then d becomes that reference's w plus its
      along; the segment's ends are its w plus its range; and the line-ends flags are its
-     `lineEnds`.
+     `lineEnds`. Also remember which reference was used, as the `nearVertex` w bit meaning
+     "starts this fragment's segment": 8 for A, 32 for B (twice that bit means "ends it").
+     Outside the precise path it defaults to 8, unused.
 7. **The segment this fragment is on:** by default it runs from 0 to `lineLength` with both
    line-ends flags set, and its index is 0. In the precise path, use the values from step 6.
    Otherwise, if there are at least two vertices, find the index with `segmentIndex(d)`, take
@@ -737,24 +739,28 @@ Then `czm_getMaterial` does the following, in order:
        log2(stamp image width × metersPerPixel / (stampMeters × `czm_pixelRatio`)), at least 0.
     2. **The nearest interior vertex.** Start with no vertex, and defaults: position zero,
        incoming and outgoing along x, up along z, distance dv 0, segment lengths before and
-       after 0, and both "segment starts / ends the line" flags false.
-       - In the precise path, if `nearVertex` w is above 0.5, use `nearVertex` and its
-         companions: position from `nearVertex`, directions from `nearIncoming`, `nearOutgoing`
-         and `nearUp`, dv from `nearUp` w, the lengths before and after from the w of
-         `nearIncoming` and `nearOutgoing`, and the flags from bits 2 and 4 of `nearVertex` w
-         (test them by dividing by 2 or 4, rounding down, and checking whether the result is
-         odd).
+       after 0, both "segment starts / ends the line" flags false, "the vertex is at the
+       segment's end" (`vertexAtEnd`) false, and the vertex's distance in d's units
+       (`vertexD`) 0.
+       - In the precise path, use `nearVertex` only if its w is above 0.5 **and** it starts or
+         ends this fragment's own segment (the bit from step 6, or twice it, is set in w; test a
+         bit b by dividing w by b, rounding down, and checking whether the result is odd). Then
+         use it and its companions: position from `nearVertex`, directions from
+         `nearIncoming`, `nearOutgoing` and `nearUp`, dv from `nearUp` w, the lengths before
+         and after from the w of `nearIncoming` and `nearOutgoing`, and the flags from bits 2
+         and 4 of `nearVertex` w. `vertexAtEnd` is whether it ends the segment, and `vertexD`
+         is the segment's end if so, otherwise its start.
        - Otherwise, if there are at least two vertices **and** the `vertexFrames` texture's size
          is exactly (vertex count, 4) (it may not be uploaded yet), take whichever end of the
          current segment is closer to d. Fetch its row 0; if its w is above 0.5 (interior), use
          it: position from row 0, incoming, outgoing and up from rows 1–3, dv from
          `vertexDistanceAt`, the lengths before and after from the neighbouring vertices'
          distances, "before starts the line" if its index is 1, and "after ends the line" if its
-         index + 2 reaches the vertex count.
+         index + 2 reaches the vertex count. `vertexAtEnd` is whether its index is the
+         segment's index + 1, and `vertexD` is dv.
     3. **Past the vertex?** Take the offset from the vertex position to the fragment's eye
-       position. The vertex is at the segment's end if dv is at least as close to the segment's
-       end as to its start. The fragment is **past its own segment's end** (`pastOwnEnd`) if
-       there is a vertex and, for a vertex at the end, the offset points forward along the
+       position. The fragment is **past its own segment's end** (`pastOwnEnd`) if
+       there is a vertex and, for a vertex at the end (`vertexAtEnd`), the offset points forward along the
        incoming direction (positive dot product), or, for a vertex at the start, backward
        against the outgoing direction (negative dot product). There `st.s` is clamped, so d
        can't place stamps; this per-pixel test is exact.
@@ -762,7 +768,7 @@ Then `czm_getMaterial` does the following, in order:
        the segment's ends and flags, gridSpacing, fadeOut, stampMeters and the mip level, over
        the result.
     5. **Stamps reaching across the vertex:** if there is a vertex and the fragment is past its
-       own end or within reach of the vertex (|d − dv| below half a stamp plus width):
+       own end or within reach of the vertex (|d − `vertexD`| below half a stamp plus width):
        - if past its own end, or the vertex is at the segment's start, draw the **incoming**
          segment's stamps measured in its frame: along = dv + the offset's component along the
          incoming direction; across = 0.5 + the offset's component along the normalized cross
@@ -804,6 +810,14 @@ Then `czm_getMaterial` does the following, in order:
 - The material is inserted **before** Cesium's own polyline shader code. Don't try to read
   Cesium's varyings such as `v_endEcAndStartEcX`: redeclaring them is a GLSL error.
 - Never name a local variable `step`; it's a GLSL built-in.
+- In the close-zoom path, **don't** use `nearVertex` for a fragment whose segment it doesn't
+  start or end. The nearest corner can be hundreds of kilometres along the line on another
+  segment; its frame makes `pastOwnEnd` true and hides the segment's own X's.
+- In the close-zoom path, **don't** compare dv with d or the segment's ends. Both are distances
+  modulo the modulus but can differ by whole multiples of it, so decide "vertex at the end" from
+  the `nearVertex` bits and test reach against `vertexD`. Keep dv (small) for the corner stamps'
+  "along" and ranges: `vertexD` can be as large as a segment, where a float only resolves
+  centimetres.
 
 ### 5.4 `setPositions(material, positions, width)` (CPU)
 
@@ -878,18 +892,22 @@ computes exactly.
      modulo the modulus;
    - the tangent is the nearest point's direction transformed by the view matrix **as a
      vector** and normalized, with w = 1.
-6. **Vertex frames** (`updateVertexFrames`):
+6. **Vertex frames** (`updateVertexFrames`, given the two reference segments from step 4,
+   either of which may be missing):
    1. Set `nearVertex` w to 0; stop if there are no vertices.
    2. Reuse a float array stored on the material, with 16 values per vertex (4 rows × RGBA);
       allocate a new one only when the vertex count changes.
    3. For each vertex v, write in eye coordinates: in row 0, its position transformed by the
       view matrix, with w = 1 if interior else 0; in rows 1, 2 and 3, its incoming direction,
       outgoing direction and up transformed by the view matrix as vectors, with w = 0.
-   4. Of the interior vertices, find the one nearest the camera (the smallest eye-space
-      position length, since the camera is the eye-space origin). Copy it into the close-zoom
-      uniforms:
+   4. Of the interior vertices that are an end of reference A's or B's segment (segment i
+      joins vertices i and i + 1), find the one nearest the camera (the smallest eye-space
+      position length, since the camera is the eye-space origin). Any other vertex is no use
+      to the shader: it can be far along the line, unrelated to the fragments near the camera.
+      Copy it into the close-zoom uniforms:
       - `nearVertex`: its eye position, with w = 1, plus 2 if v is 1, plus 4 if v is the
-        second-to-last vertex;
+        second-to-last vertex, plus 8 if v is A's segment index, 16 if it is A's index + 1,
+        32 if it is B's index, 64 if it is B's index + 1;
       - `nearIncoming`: its incoming direction in eye coordinates, with w = its distance minus
         the previous vertex's distance;
       - `nearOutgoing`: its outgoing direction in eye coordinates, with w = the next vertex's
@@ -1401,6 +1419,11 @@ hides the precision bugs. For headless Chrome, launch with
      about 7 px per cm for an 800 px-wide view. Check this with
      `SceneTransforms.worldToWindowCoordinates` on a fixed ground point.
    - The X's must stay crisp, not smear into a bar.
+   - **Nearest corner on another segment:** draw a zigzag polyline of about 4,000 km and put the
+     camera low (about 2 km) over its first segment, looking along it, where an interior vertex
+     of a later segment is nearer than either end of the first. The X's must run unbroken from
+     the bottom of the screen to the horizon. `docs/PATCH_NOTES.md` note 1 has an exact scene
+     for `app.importState`.
 9. **No loading flash:** delay the pattern image request by about 1.5 s. New shapes must show
    nothing, not a solid block, until the image loads, and it must appear without moving the
    camera (request-render mode).
