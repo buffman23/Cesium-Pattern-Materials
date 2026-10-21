@@ -238,7 +238,8 @@ so keep the ids exactly. The select values are the keys of `LINE_IMAGES` and `ST
   full-width and styled like the buttons.
 - The solution description and hint are small text. The value spans and `#cameraHeight` use a
   monospace font with tabular figures, so numbers don't jitter as they change. `#cameraHeight`
-  has a thin top border separating it from the controls.
+  has a thin top border separating it from the controls, and keeps line breaks in its text
+  (`white-space: pre-line`) so the height and the latitude/longitude sit on separate lines.
 - The two plain sliders are full width.
 
 The two-handle max height slider is two range inputs stacked on one track:
@@ -1333,7 +1334,9 @@ missing. Call `useSolution()` once at startup, after the controls below are set 
   renderer's `setImages`.
 - **Camera height readout:** after each frame, show "Camera height: " followed by the height
   with two decimals in meters below 10 m, one decimal in meters below 1 km, and otherwise in
-  kilometres with two decimals (formatted for the locale). Only touch the page when the text
+  kilometres with two decimals (formatted for the locale). On a second line, show the
+  camera's latitude and longitude in degrees with five decimals (about 1 m), signed (north and
+  east positive), as "Lat 39.74000°, Lng -104.99000°". Only touch the page when the text
   changes.
 
 ### 9.4 Console helpers

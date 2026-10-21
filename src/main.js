@@ -256,9 +256,15 @@ function formatHeight(meters) {
   return `${km} km`;
 }
 
+// Degrees with 5 decimals (about 1 m), signed: north / east positive.
+const formatDegrees = (radians) => CesiumMath.toDegrees(radians).toFixed(5);
+
 // postRender fires every frame; only touch the DOM when the text changes.
 viewer.scene.postRender.addEventListener(() => {
-  const text = `Camera height: ${formatHeight(viewer.camera.positionCartographic.height)}`;
+  const position = viewer.camera.positionCartographic;
+  const text =
+    `Camera height: ${formatHeight(position.height)}\n` +
+    `Lat ${formatDegrees(position.latitude)}°, Lng ${formatDegrees(position.longitude)}°`;
   if (cameraHeight.textContent !== text) {
     cameraHeight.textContent = text;
   }

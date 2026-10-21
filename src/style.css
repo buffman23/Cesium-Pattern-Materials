@@ -170,4 +170,5 @@ body,
   font-size: 12px;
   font-family: ui-monospace, Consolas, monospace;
   font-variant-numeric: tabular-nums;
+  white-space: pre-line; /* height and lat/lng on separate lines */
 }
