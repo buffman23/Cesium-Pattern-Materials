@@ -92,9 +92,10 @@ uniform float vertexCount;
 // Per vertex (texel x = vertex index), eye coordinates: row 0 = position (w: 1 if interior),
 // row 1 = incoming direction, row 2 = outgoing direction, row 3 = up.
 uniform sampler2D vertexFrames;
-// Close-zoom path: the interior vertex nearest the camera, eye coordinates.
-// nearVertex.w: 0 = none, else 1 + 2 if the segment before starts the line + 4 if the segment
-// after ends the line.
+// Close-zoom path: the interior vertex nearest the camera among the ends of referenceA's and
+// referenceB's segments, eye coordinates. nearVertex.w: 0 = none, else 1 + 2 if the segment
+// before starts the line + 4 if the segment after ends the line, + 8 / 16 if it starts / ends
+// referenceA's segment, + 32 / 64 if it starts / ends referenceB's.
 uniform vec4 nearVertex;        // xyz: position, w: see above
 uniform vec4 nearIncoming;      // xyz: incoming direction, w: length of the segment before
 uniform vec4 nearOutgoing;      // xyz: outgoing direction, w: length of the segment after
@@ -246,6 +247,7 @@ czm_material czm_getMaterial(czm_materialInput materialInput)
     bool precise = false;
     vec2 preciseVertices = vec2(0.0);   // the chosen segment's two ends, same units as d
     vec2 preciseLineEnds = vec2(0.0);
+    float nearVertexFlagBase = 8.0;     // nearVertex.w bit marking it as the chosen segment's start
     if (metersPerPixel < preciseMetersPerPixel && tangentA.w > 0.5) {
         precise = true;
         vec3 toA = eyeCoordinate.xyz - referenceA.xyz;
@@ -258,6 +260,7 @@ czm_material czm_getMaterial(czm_materialInput materialInput)
         d = useA ? referenceA.w + alongA : referenceB.w + alongB;
         preciseVertices = useA ? referenceA.w + rangeA : referenceB.w + rangeB;
         preciseLineEnds = useA ? lineEndsA : lineEndsB;
+        nearVertexFlagBase = useA ? 8.0 : 32.0;
     }
 
     // The segment this fragment is on.
@@ -306,9 +309,18 @@ czm_material czm_getMaterial(czm_materialInput materialInput)
         float lengthAfter = 0.0;
         bool beforeStartsLine = false;   // the segment before the vertex is the line's first
         bool afterEndsLine = false;      // the segment after the vertex is the line's last
+        bool vertexAtEnd = false;        // the vertex ends this fragment's segment (else starts it)
+        // The vertex's distance along the line in the same units as d (dv may differ from it by
+        // a multiple of the close-zoom modulus).
+        float vertexD = 0.0;
         if (precise) {
-            if (nearVertex.w > 0.5) {
+            // Only a vertex of this fragment's own segment: the nearest one may be elsewhere.
+            bool startsOwn = mod(floor(nearVertex.w / nearVertexFlagBase), 2.0) > 0.5;
+            bool endsOwn = mod(floor(nearVertex.w / (2.0 * nearVertexFlagBase)), 2.0) > 0.5;
+            if (nearVertex.w > 0.5 && (startsOwn || endsOwn)) {
                 haveVertex = true;
+                vertexAtEnd = endsOwn;
+                vertexD = endsOwn ? segmentEnd : segmentStart;
                 beforeStartsLine = mod(floor(nearVertex.w / 2.0), 2.0) > 0.5;
                 afterEndsLine = mod(floor(nearVertex.w / 4.0), 2.0) > 0.5;
                 vertexPosition = nearVertex.xyz;
@@ -330,6 +342,8 @@ czm_material czm_getMaterial(czm_materialInput materialInput)
                 outgoing = texelFetch(vertexFrames, ivec2(v, 2), 0).xyz;
                 up = texelFetch(vertexFrames, ivec2(v, 3), 0).xyz;
                 dv = vertexDistanceAt(v);
+                vertexAtEnd = v == segment + 1;
+                vertexD = dv;
                 lengthBefore = dv - vertexDistanceAt(v - 1);
                 lengthAfter = vertexDistanceAt(v + 1) - dv;
                 beforeStartsLine = v == 1;
@@ -341,7 +355,6 @@ czm_material czm_getMaterial(czm_materialInput materialInput)
         // so d can't place stamps there. Tested exactly per pixel from the fragment's position;
         // a screen-space test of st.s changing would misclassify 2x2 pixel quads at the edge.
         vec3 offset = eyeCoordinate.xyz - vertexPosition;
-        bool vertexAtEnd = abs(dv - segmentEnd) <= abs(dv - segmentStart);
         bool pastOwnEnd = haveVertex
             && (vertexAtEnd ? dot(offset, incoming) > 0.0 : dot(offset, outgoing) < 0.0);
 
@@ -355,7 +368,7 @@ czm_material czm_getMaterial(czm_materialInput materialInput)
         // frame from the vertex position and directions. That adds the other segment's stamps
         // and, past the vertex, this segment's too.
         float reach = 0.5 * stampMeters + width;
-        if (haveVertex && (pastOwnEnd || abs(d - dv) < reach)) {
+        if (haveVertex && (pastOwnEnd || abs(d - vertexD) < reach)) {
             if (pastOwnEnd || !vertexAtEnd) {
                 float along = dv + dot(offset, incoming);
                 float across = 0.5 + dot(offset, normalize(cross(incoming, up))) / width;
@@ -643,7 +656,7 @@ export default class PolylinePatternMaterial {
     setReference(uniforms.referenceB, uniforms.tangentB, uniforms.rangeB, uniforms.lineEndsB,
       second, segmentCount, camera, modulus);
 
-    updateVertexFrames(material, camera, modulus);
+    updateVertexFrames(material, camera, modulus, first?.segment, second?.segment);
   }
 }
 
@@ -765,9 +778,11 @@ const scratchVertexEye = new Cartesian3();
 
 /**
  * Uploads every vertex frame in eye coordinates (rows: position, incoming, outgoing, up) and
- * sets the close-zoom uniforms for the interior vertex nearest the camera.
+ * sets the close-zoom uniforms for the interior vertex nearest the camera among the ends of the
+ * reference segments (A and B). Any other vertex is no use to the shader there: it can be far
+ * along the line from both, its frame unrelated to the fragments around the camera.
  */
-function updateVertexFrames(material, camera, modulus) {
+function updateVertexFrames(material, camera, modulus, segmentA, segmentB) {
   const uniforms = material.uniforms;
   const vertices = material.vertices;
   const width = vertices.length;
@@ -780,13 +795,17 @@ function updateVertexFrames(material, camera, modulus) {
   if (!data || data.length !== width * 4 * 4) {
     data = material.vertexFrameData = new Float32Array(width * 4 * 4);
   }
+  // Segment i joins vertices i and i + 1.
+  const candidates = [segmentA, segmentB]
+    .filter(Boolean)
+    .flatMap((segment) => [segment.index, segment.index + 1]);
   let nearest;
   let nearestDistance = Infinity;
   vertices.forEach((vertex, v) => {
     const eye = Matrix4.multiplyByPoint(view, vertex.position, scratchVertexEye);
     data.set([eye.x, eye.y, eye.z, vertex.interior ? 1 : 0], v * 4);
     const distance = Cartesian3.magnitude(eye); // the camera is the eye-space origin
-    if (vertex.interior && distance < nearestDistance) {
+    if (vertex.interior && candidates.includes(v) && distance < nearestDistance) {
       nearestDistance = distance;
       nearest = { vertex, v, eye: Cartesian3.clone(eye) };
     }
@@ -805,8 +824,11 @@ function updateVertexFrames(material, camera, modulus) {
     const [ux, uy, uz] = at(2);
     const lengthBefore = vertex.distance - vertices[v - 1].distance;
     const lengthAfter = vertices[v + 1].distance - vertex.distance;
-    // w: 1 + 2 if the segment before starts the line + 4 if the segment after ends it.
-    const flags = 1 + (v === 1 ? 2 : 0) + (v === width - 2 ? 4 : 0);
+    // w: 1 + 2 if the segment before starts the line + 4 if the segment after ends it, + 8 / 16
+    // if it starts / ends segment A, + 32 / 64 if it starts / ends segment B.
+    const flags = 1 + (v === 1 ? 2 : 0) + (v === width - 2 ? 4 : 0) +
+      (segmentA?.index === v ? 8 : 0) + (segmentA?.index === v - 1 ? 16 : 0) +
+      (segmentB?.index === v ? 32 : 0) + (segmentB?.index === v - 1 ? 64 : 0);
     Cartesian4.fromElements(eye.x, eye.y, eye.z, flags, uniforms.nearVertex);
     Cartesian4.fromElements(ix, iy, iz, lengthBefore, uniforms.nearIncoming);
     Cartesian4.fromElements(ox, oy, oz, lengthAfter, uniforms.nearOutgoing);
