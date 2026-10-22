@@ -65,6 +65,9 @@ and document these requirements in each file's comments:
     layer; `undefined` leaves it unchanged.
   - `setPositions(material, positions, width)` must be called whenever the line's positions or
     width change. `width` is the same pixel width given to `GroundPolylineGeometry`.
+  - `cornerCaps(material)` returns `{ positions, width }` lines for the corners Cesium doesn't
+    miter, to add to the same `GroundPolylinePrimitive` as further geometry instances. Call it
+    after `setPositions`. See 5.4.
   - `updateCamera(material, scene)` must be called **every frame**, for example from
     `scene.preRender`. It takes the **scene**, not the camera: it needs the canvas size and
     `requestRender()`.
@@ -98,7 +101,7 @@ and document these requirements in each file's comments:
   `public/patterns/`, are:
   | file | size | use |
   |---|---|---|
-  | `line-solid.svg` | 64×128 | line |
+  | `line-solid.svg`, `line-bottom.svg` | 64×128 | line |
   | `line-dashed.svg`, `line-sawtooth.svg` | 128×128 | line |
   | `line-wave.svg` | 256×128 | line |
   | `x-symbol.svg`, `arrow-symbol.svg` | 256×128 | stamp |
@@ -212,7 +215,7 @@ containing, in this order:
    Say so in an HTML comment.
 6. A `div` with class `row` holding two `div`s, each with a label and a select:
    - `#lineImage` ("Line image"): options None (value empty), Solid (`solid`, selected), Dashed
-     (`dashed`), Wave (`wave`) and Sawtooth (`sawtooth`);
+     (`dashed`), Wave (`wave`), Sawtooth (`sawtooth`) and Bottom (`bottom`);
    - `#stampImage` ("Stamp image"): options None (value empty), X (`x`, selected) and Arrow
      (`arrow`).
 7. A `div#hint` with the text "Pick a tool to start drawing."
@@ -305,6 +308,14 @@ continue past the edges and are clipped by the viewBox, so the joins are exact.
 </svg>
 ```
 
+`line-bottom.svg` (a plain stroke along the bottom edge):
+
+```svg
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="128" viewBox="0 0 64 128">
+  <rect x="0" y="116" width="64" height="12" fill="#ffffff" />
+</svg>
+```
+
 The **stamp images** are 256×128, so one stamp is twice the line width long, and at spacing 1
 the symbols are one stamp length apart.
 
@@ -352,7 +363,7 @@ exports these constants:
 
 | export | value |
 |---|---|
-| `LINE_IMAGES` | an object mapping `solid`, `dashed`, `wave` and `sawtooth` to `/patterns/line-solid.svg`, `/patterns/line-dashed.svg`, `/patterns/line-wave.svg` and `/patterns/line-sawtooth.svg` |
+| `LINE_IMAGES` | an object mapping `solid`, `dashed`, `wave`, `sawtooth` and `bottom` to `/patterns/line-solid.svg`, `/patterns/line-dashed.svg`, `/patterns/line-wave.svg`, `/patterns/line-sawtooth.svg` and `/patterns/line-bottom.svg` |
 | `STAMP_IMAGES` | an object mapping `x` to `/patterns/x-symbol.svg` and `arrow` to `/patterns/arrow-symbol.svg` |
 | `DEFAULT_LINE_IMAGE` | `"solid"` |
 | `DEFAULT_STAMP_IMAGE` | `"x"` |
@@ -553,7 +564,9 @@ line's start.
   the period there, while the level's fractional part is between 0 and 0.2.
 - It runs on across vertices. In the mitered wedge outside a corner, `GroundPolylinePrimitive`
   clamps `st.s` to the vertex, so the wedge shows the image column at the vertex. For a solid
-  line that's a clean miter join.
+  line that's a clean miter join. Cesium doesn't miter corners sharper than 60°: it cuts both
+  segments off along one line through the vertex, square to the bisector. There a **corner
+  cap** (extra geometry from `cornerCaps`) draws a miter clipped half a line width out.
 
 **Stamp layer.** Symbols drawn on top at a near-constant pixel size, anchored to the line.
 - The repeat length is the stamp length × `spacing`. `spacing` defaults to 1 (touching) and is
@@ -591,6 +604,7 @@ pixels wide, and the line looks thinner.
 | `lineShift`, `stampShift` | `0` | zoom settle level shifts (Step 3) |
 | `sizeScale` | `1` | max height factor (Step 4) |
 | `lineLength` | `1` | geodesic length of the line in meters (set by `setPositions`) |
+| `lineWidth` | `1` | the line's width in pixels (set by `setPositions`); corner caps are drawn wider |
 | `preciseMetersPerPixel` | `0` | switch-over threshold for the close-zoom path |
 | `referenceA`, `referenceB` | `new Cartesian4()` | xyz: point on the line in eye coordinates; w: distance along the line modulo the modulus (5.5) |
 | `tangentA`, `tangentB` | `new Cartesian4()` | xyz: unit line direction in eye coordinates; w: 1 if valid, else 0 |
@@ -598,7 +612,7 @@ pixels wide, and the line looks thinner.
 | `lineEndsA`, `lineEndsB` | `new Cartesian2()` | that reference's segment: x = 1 if it starts the line, y = 1 if it ends it |
 | `vertexDistances` | `Material.DefaultImageId` | float data texture, one texel per vertex in a single row: distance along the line of each vertex, ascending, both ends included |
 | `vertexCount` | `0` | number of texels in `vertexDistances` |
-| `vertexFrames` | `Material.DefaultImageId` | float data texture, one column per vertex and 4 rows, eye coordinates. Row 0: position, with w = 1 if the vertex is interior. Rows 1, 2, 3: incoming direction, outgoing direction, up. Re-uploaded every frame. |
+| `vertexFrames` | `Material.DefaultImageId` | float data texture, one column per vertex and 4 rows, eye coordinates. Row 0: position, with w = 2 if the vertex is interior and has a corner cap, 1 if it's interior, else 0. Rows 1, 2, 3: incoming direction, outgoing direction, up. Re-uploaded every frame. |
 | `nearVertex` | `new Cartesian4()` | close-zoom path: the interior vertex nearest the camera among the ends of reference A's and B's segments. xyz: eye position; w: 0 = none, otherwise 1, plus 2 if the segment before it starts the line, plus 4 if the segment after it ends the line, plus 8 / 16 if it starts / ends reference A's segment, plus 32 / 64 if it starts / ends reference B's |
 | `nearIncoming`, `nearOutgoing` | `new Cartesian4()` | xyz: its incoming / outgoing direction; w: length of the segment before / after |
 | `nearUp` | `new Cartesian4()` | xyz: its up; w: its distance along the line modulo the modulus |
@@ -641,7 +655,8 @@ the uniform to the image, or to `Material.DefaultImageId` when it's `null`, and 
 ### 5.3 Fragment shader
 
 The source starts with the exact declaration `in float v_width;`, then the constant minimum
-spacing (0.25), then every uniform from 5.2. Then these helper functions:
+spacing (0.25) and a loop bound for the cap's vertex search (4096), then every uniform from
+5.2. Then these helper functions:
 
 - **`vertexDistanceAt(i)`**: fetches texel i of row 0 of `vertexDistances` exactly (with
   `texelFetch`) and returns its red channel.
@@ -708,8 +723,10 @@ Then `czm_getMaterial` does the following, in order:
    turn the fragment coordinate and that depth into an eye-space position with
    `czm_windowToEyeCoordinates` and divide by its w. metersPerPixel is `czm_metersPerPixel` of
    that position, at least 1e-6. It's per CSS pixel, the same units as `v_width`.
-5. **Max height band:** bandPixels is `v_width` × `sizeScale`, but at least 1 pixel and at most
-   `v_width`. coverage is `v_width` × `sizeScale` / bandPixels (below 1 only when the band would
+5. **Max height band:** the fragment is a corner cap's (`cap`) if `v_width` is more than 1.5 ×
+   `lineWidth`; its geometry width in pixels is then `lineWidth`, otherwise `v_width`.
+   bandPixels is that × `sizeScale`, but at least 1 pixel and at most the geometry width.
+   coverage is the geometry width × `sizeScale` / bandPixels (below 1 only when the band would
    be thinner than a pixel; it then fades instead of aliasing). The band width on the ground,
    width, is bandPixels × metersPerPixel.
 6. **Close-zoom precision path** (see 5.5). If metersPerPixel is below `preciseMetersPerPixel`
@@ -729,9 +746,28 @@ Then `czm_getMaterial` does the following, in order:
    line if the index is 0, and ends it if index + 2 reaches the vertex count.
 8. **Across the band:** t = (`st.t` − 0.5) × `v_width` / bandPixels + 0.5, so 0..1 spans the
    centred band.
-9. **Line layer:** if present, the result is `lineAt` at d clamped to the segment's ends, with
-   t, bandPixels and metersPerPixel. Otherwise the result starts transparent.
-10. **Stamp layer**, if present:
+9. **Corner cap**, for a cap fragment only (`st` means nothing there):
+   - Discard unless there are at least 3 vertices and the `vertexFrames` texture's size is
+     exactly (vertex count, 4). Among the interior vertices (1 to count − 2), find the one with
+     w above 1.5 in row 0 nearest the fragment's eye position; discard if there's none. Read its
+     position, incoming, outgoing and up from rows 0–3.
+   - Its distance along the line and the segment lengths before and after: in the precise path,
+     if `nearVertex` w is above 0.5 and `nearVertex` is within 1 cm of this vertex, from
+     `nearUp` w and the w of `nearIncoming` and `nearOutgoing` (modulo the modulus, as d is
+     there); otherwise from `vertexDistanceAt` of it and its neighbours.
+   - offset is the fragment's eye position minus the vertex's. Discard if its dot product with
+     (incoming − outgoing) is at most 0: the inner side of Cesium's cut, which the line covers.
+   - The bevel direction is incoming + outgoing, normalized (if its length is under 1e-6, the
+     normalized cross product of up and incoming). The fragment belongs to the incoming segment
+     if dot(offset, incoming + bevel) < 0, else to the outgoing one if dot(offset, bevel +
+     outgoing) > 0, else to the bevel. side is the offset's component along the normalized cross
+     product of that direction and up. Discard if |side| is at least half the geometry width ×
+     metersPerPixel (this clips the miter half a line width out).
+   - t becomes 0.5 + side / width, and d becomes the vertex's distance.
+10. **Line layer:** if present, the result is `lineAt` at d (clamped to the segment's ends,
+    except in a cap), with t, bandPixels and metersPerPixel. Otherwise the result starts
+    transparent.
+11. **Stamp layer**, if present:
     1. stampMeters is width × stamp image width / height. The repeat is stampMeters ×
        `spacing` (at least the minimum spacing). The level is log2 of the repeat plus
        `stampShift`; k is the level rounded **up**, not down; gridSpacing is 2^k meters (1×–2×
@@ -742,7 +778,10 @@ Then `czm_getMaterial` does the following, in order:
        after 0, both "segment starts / ends the line" flags false, "the vertex is at the
        segment's end" (`vertexAtEnd`) false, and the vertex's distance in d's units
        (`vertexD`) 0.
-       - In the precise path, use `nearVertex` only if its w is above 0.5 **and** it starts or
+       - In a cap, use the cap's vertex from step 9: its frame, distance (as dv and `vertexD`)
+         and segment lengths, "before starts the line" if its index is 1, and "after ends the
+         line" if its index + 2 reaches the vertex count.
+       - Otherwise, in the precise path, use `nearVertex` only if its w is above 0.5 **and** it starts or
          ends this fragment's own segment (the bit from step 6, or twice it, is set in w; test a
          bit b by dividing w by b, rounding down, and checking whether the result is odd). Then
          use it and its companions: position from `nearVertex`, directions from
@@ -759,8 +798,8 @@ Then `czm_getMaterial` does the following, in order:
          index + 2 reaches the vertex count. `vertexAtEnd` is whether its index is the
          segment's index + 1, and `vertexD` is dv.
     3. **Past the vertex?** Take the offset from the vertex position to the fragment's eye
-       position. The fragment is **past its own segment's end** (`pastOwnEnd`) if
-       there is a vertex and, for a vertex at the end (`vertexAtEnd`), the offset points forward along the
+       position. The fragment is **past its own segment's end** (`pastOwnEnd`) if it's a
+       cap's, or if there is a vertex and, for a vertex at the end (`vertexAtEnd`), the offset points forward along the
        incoming direction (positive dot product), or, for a vertex at the start, backward
        against the outgoing direction (negative dot product). There `st.s` is clamped, so d
        can't place stamps; this per-pixel test is exact.
@@ -778,7 +817,7 @@ Then `czm_getMaterial` does the following, in order:
        - if past its own end, or the vertex is at the segment's end, do the same for the
          **outgoing** segment: along and across from the outgoing direction, the segment from dv
          to dv + length after, flags (false, after ends the line).
-11. **Finish:** multiply the result by coverage. Discard if its alpha is below 0.005.
+12. **Finish:** multiply the result by coverage. Discard if its alpha is below 0.005.
     Un-premultiply (divide RGB by alpha), gamma-correct with `czm_gammaCorrect`, and write the
     RGB to the material's **emission** (not diffuse: the line is unlit) and the alpha to its
     alpha. Return the material.
@@ -821,7 +860,7 @@ Then `czm_getMaterial` does the following, in order:
 
 ### 5.4 `setPositions(material, positions, width)` (CPU)
 
-Store the width as the material's `lineWidth`. Then, for each consecutive pair of positions:
+Store the width as the material's `lineWidth` and as the `lineWidth` uniform. Then, for each consecutive pair of positions:
 
 1. Build an `EllipsoidGeodesic` between them (converted to cartographic on the WGS84
    ellipsoid).
@@ -846,7 +885,20 @@ entry per vertex (one more than the number of segments), in world coordinates. F
   1 / segment length (about 1 m) but at most 0.5, and both fractions clamped to 0..1;
 - **up:** the WGS84 surface normal at the position;
 - **distance:** the start of "after", or for the last vertex the start plus length of "before";
-- **interior:** true when both "before" and "after" exist.
+- **interior:** true when both "before" and "after" exist;
+- **cap:** interior, and the angle between incoming and outgoing is over 120°. Cesium doesn't
+  miter such a corner (60° or sharper; `MITER_BREAK_SMALL` in `GroundPolylineGeometry`): it
+  cuts both segments off along one line through the vertex, square to the bisector, so an image
+  off the centre line is cut off outside the corner.
+
+`cornerCaps(material)` (static) returns one line per cap vertex: positions [the vertex, the
+vertex + (incoming − outgoing, normalized) × a quarter of the shorter adjacent segment, scaled to
+the WGS84 surface], and width 2 × the material's `lineWidth`. The doubled width is how the
+shader tells cap fragments apart, and leaves room at the sides; the length must reach half a
+line width, and a corner is only a few pixels across once it doesn't. Don't build the corner
+from extra vertices instead (a bevel 1 cm long): Cesium merges points within 0.6 mm, and a
+segment that short gives a shadow volume that folds over, so the corner vanishes with the
+camera low and straight above it.
 
 > `lineLength` must be the geodesic length. Cesium normalizes `st.s` by the line's arc length,
 > and a wrong length stretches the images.
@@ -898,7 +950,7 @@ computes exactly.
    2. Reuse a float array stored on the material, with 16 values per vertex (4 rows × RGBA);
       allocate a new one only when the vertex count changes.
    3. For each vertex v, write in eye coordinates: in row 0, its position transformed by the
-      view matrix, with w = 1 if interior else 0; in rows 1, 2 and 3, its incoming direction,
+      view matrix, with w = 2 if it has a cap, 1 if interior, else 0; in rows 1, 2 and 3, its incoming direction,
       outgoing direction and up transformed by the view matrix as vectors, with w = 0.
    4. Of the interior vertices that are an end of reference A's or B's segment (segment i
       joins vertices i and i + 1), find the one nearest the camera (the smallest eye-space
@@ -1137,7 +1189,8 @@ A helper `groundLine(positions, width, material, loop)` (loop defaults to false)
 `GroundPolylinePrimitive` to the scene and returns it. The primitive has one geometry instance:
 a `GroundPolylineGeometry` with the positions, width, loop flag and the line granularity from
 7.3. Its appearance is a `PolylineMaterialAppearance` with the given material, and it's created
-with `asynchronous: false`.
+with `asynchronous: false`. An optional fifth argument, `extraLines` (`{ positions, width }`
+objects, default none), adds one more instance per line (not looped) to the same primitive.
 
 A helper `replace(state, key, primitive)` removes the primitive stored under `key` from the
 scene's primitive collection, if there is one (the collection destroys it), then stores the new
@@ -1151,7 +1204,8 @@ one under that key.
    bounding-box diagonal (`boundingBoxDiagonal`, Step 4).
 3. Build it: call `setPositions` on the material with the positions and current line width,
    then apply the max height (below), then call the material's `updateCamera`, then replace the
-   state's `primitive` with a new ground line using that material and width.
+   state's `primitive` with a new ground line using that material and width, with the
+   material's `cornerCaps` as extra lines.
 
 **Polygon:**
 1. The first time a shape id is seen, create its state with a new `PolygonPatternMaterial`,
@@ -1392,7 +1446,7 @@ hides the precision bugs. For headless Chrome, launch with
 1. **Basic look at 15 km camera height:**
    - The polyline shows the line image with evenly spaced, upright X's on top; the first X
      touches the first vertex.
-   - Each line image (solid, dashed, wave, sawtooth) and each stamp image (X, arrow) works, and
+   - Each line image (solid, dashed, wave, sawtooth, bottom) and each stamp image (X, arrow) works, and
      "None" removes that layer.
    - The polygon shows continuous 45° hatching with no seams.
    - Dragging a vertex updates both live, and doesn't stretch the line pattern.

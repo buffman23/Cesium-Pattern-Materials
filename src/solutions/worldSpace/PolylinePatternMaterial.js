@@ -7,6 +7,7 @@ import {
   Ellipsoid,
   EllipsoidGeodesic,
   Material,
+  Math as CesiumMath,
   Matrix4,
   PixelDatatype,
   PixelFormat,
@@ -50,6 +51,15 @@ import {
 //    the first vertex (the first stamp touches it) and runs up to the last vertex, which cuts
 //    off the final stamp; moving the last vertex can make the line finish with a whole stamp.
 //
+// Corner caps: GroundPolylineGeometry doesn't miter a corner sharper than 60 degrees. It cuts
+// both segments off along one line through the vertex, square to the corner's bisector, so
+// nothing is drawn outside the corner. Those vertices get an extra geometry instance (see
+// cornerCaps), a line along the outward bisector drawn CAP_WIDTH_FACTOR times as wide, which is
+// how the shader tells its fragments apart. There the shader draws a miter clipped half a line
+// width out (each segment extended up to a short bevel square to the bisector), measured in eye
+// space from the vertex frame, with the line image's column at the vertex, both segments'
+// stamps, and nothing on the inner side of the cut, which the line itself covers.
+//
 // Max camera height: above it (sizeScale < 1, see maxHeight.js) both layers keep their ground
 // size instead of their on-screen size. The geometry stays v_width pixels wide (rebuilding it
 // every frame would be costly), so the pattern is drawn in a centred band v_width * sizeScale
@@ -67,6 +77,7 @@ const source = /* glsl */ `
 in float v_width;               // line width in pixels, provided by GroundPolylinePrimitive
 
 const float MIN_SPACING = 0.25; // below 1, stamps overlap; see stampsAt
+const int MAX_VERTICES = 4096;  // loop bound for the corner cap's vertex search
 
 uniform sampler2D lineImage;    // 1x1 placeholder = no line layer (null, or still loading)
 uniform sampler2D stampImage;   // 1x1 placeholder = no stamps
@@ -78,6 +89,7 @@ uniform float lineShift;
 uniform float stampShift;
 uniform float sizeScale;        // < 1 above the max camera height (pattern keeps its ground size)
 uniform float lineLength;
+uniform float lineWidth;        // the line's width in pixels (corner caps are drawn wider)
 uniform float preciseMetersPerPixel;
 uniform vec4 referenceA;        // xyz: point on the line (eye coords), w: distance mod modulus
 uniform vec4 tangentA;          // xyz: line direction there (eye coords), w: 1 if valid
@@ -89,7 +101,8 @@ uniform vec2 lineEndsA;         // referenceA's segment: x = 1 if it starts the 
 uniform vec2 lineEndsB;
 uniform sampler2D vertexDistances;  // r: distance along the line of each vertex, ascending
 uniform float vertexCount;
-// Per vertex (texel x = vertex index), eye coordinates: row 0 = position (w: 1 if interior),
+// Per vertex (texel x = vertex index), eye coordinates: row 0 = position (w: 1 if interior, 2
+// if interior with a corner cap),
 // row 1 = incoming direction, row 2 = outgoing direction, row 3 = up.
 uniform sampler2D vertexFrames;
 // Close-zoom path: the interior vertex nearest the camera among the ends of referenceA's and
@@ -236,11 +249,14 @@ czm_material czm_getMaterial(czm_materialInput materialInput)
     vec4 eyeCoordinate = czm_windowToEyeCoordinates(gl_FragCoord.xy, depth);
     eyeCoordinate /= eyeCoordinate.w;
     float metersPerPixel = max(czm_metersPerPixel(eyeCoordinate), 1e-6);
+    // A corner cap's geometry is CAP_WIDTH_FACTOR times wider than the line (see the header).
+    bool cap = v_width > 1.5 * lineWidth;
+    float geometryPixels = cap ? lineWidth : v_width;
     // Above the max camera height (sizeScale < 1) the pattern keeps its ground size: it is drawn
-    // in a band v_width * sizeScale pixels wide, centred in the geometry's v_width band. Below
+    // in a band geometryPixels * sizeScale pixels wide, centred in the geometry's band. Below
     // one pixel the band stays one pixel wide and fades with its coverage instead of aliasing.
-    float bandPixels = min(max(v_width * sizeScale, 1.0), v_width);
-    float coverage = v_width * sizeScale / bandPixels;
+    float bandPixels = min(max(geometryPixels * sizeScale, 1.0), geometryPixels);
+    float coverage = geometryPixels * sizeScale / bandPixels;
     float width = bandPixels * metersPerPixel;     // pattern band width on the ground, meters
 
     // Zoomed in close: measure along the line from the nearest reference point instead.
@@ -280,9 +296,70 @@ czm_material czm_getMaterial(czm_materialInput materialInput)
     }
     float t = (materialInput.st.t - 0.5) * v_width / bandPixels + 0.5;
 
+    // A corner cap: the frame of the cap vertex nearest this fragment, and where the fragment
+    // lies in the clipped miter (else it's discarded).
+    int capVertex = -1;
+    vec3 capPosition = vec3(0.0);
+    vec3 capIncoming = vec3(1.0, 0.0, 0.0);
+    vec3 capOutgoing = vec3(1.0, 0.0, 0.0);
+    vec3 capUp = vec3(0.0, 0.0, 1.0);
+    float capDistance = 0.0;        // the vertex's distance along the line, same units as d
+    float capLengthBefore = 0.0;
+    float capLengthAfter = 0.0;
+    if (cap) {
+        if (vertexCount < 3.0 || textureSize(vertexFrames, 0) != ivec2(int(vertexCount), 4)) {
+            discard;
+        }
+        float nearest = 1e30;
+        for (int i = 1; i < MAX_VERTICES; i++) {
+            if (i >= int(vertexCount) - 1) {
+                break;
+            }
+            vec4 frame = texelFetch(vertexFrames, ivec2(i, 0), 0);
+            float away = length(eyeCoordinate.xyz - frame.xyz);
+            if (frame.w > 1.5 && away < nearest) {
+                nearest = away;
+                capVertex = i;
+            }
+        }
+        if (capVertex < 0) {
+            discard;
+        }
+        capPosition = texelFetch(vertexFrames, ivec2(capVertex, 0), 0).xyz;
+        capIncoming = texelFetch(vertexFrames, ivec2(capVertex, 1), 0).xyz;
+        capOutgoing = texelFetch(vertexFrames, ivec2(capVertex, 2), 0).xyz;
+        capUp = texelFetch(vertexFrames, ivec2(capVertex, 3), 0).xyz;
+        // Zoomed in close, the vertex nearest the camera has its distances modulo the close-zoom
+        // modulus, as d has; a float of the whole distance would be too coarse there.
+        bool near = precise && nearVertex.w > 0.5 && length(nearVertex.xyz - capPosition) < 0.01;
+        capDistance = near ? nearUp.w : vertexDistanceAt(capVertex);
+        capLengthBefore = near ? nearIncoming.w
+            : vertexDistanceAt(capVertex) - vertexDistanceAt(capVertex - 1);
+        capLengthAfter = near ? nearOutgoing.w
+            : vertexDistanceAt(capVertex + 1) - vertexDistanceAt(capVertex);
+
+        // The line covers everything on the inner side of the cut (square to the bisector).
+        vec3 offset = eyeCoordinate.xyz - capPosition;
+        if (dot(offset, capIncoming - capOutgoing) <= 0.0) {
+            discard;
+        }
+        // Each segment runs on up to its miter with the bevel, which lies between them, square
+        // to the bisector (its direction is the mean of the segments').
+        vec3 bevel = capIncoming + capOutgoing;
+        bevel = length(bevel) > 1e-6 ? normalize(bevel) : normalize(cross(capUp, capIncoming));
+        vec3 direction = dot(offset, capIncoming + bevel) < 0.0 ? capIncoming
+            : dot(offset, bevel + capOutgoing) > 0.0 ? capOutgoing : bevel;
+        float side = dot(offset, normalize(cross(direction, capUp)));
+        if (abs(side) >= 0.5 * geometryPixels * metersPerPixel) {
+            discard;
+        }
+        t = 0.5 + side / width;
+        d = capDistance;
+    }
+
     vec4 result = vec4(0.0);
     if (hasLine) {
-        result = lineAt(clamp(d, segmentStart, segmentEnd), t, bandPixels, metersPerPixel);
+        result = lineAt(cap ? d : clamp(d, segmentStart, segmentEnd), t, bandPixels, metersPerPixel);
     }
 
     if (hasStamp) {
@@ -313,7 +390,19 @@ czm_material czm_getMaterial(czm_materialInput materialInput)
         // The vertex's distance along the line in the same units as d (dv may differ from it by
         // a multiple of the close-zoom modulus).
         float vertexD = 0.0;
-        if (precise) {
+        if (cap) {
+            haveVertex = true;
+            vertexPosition = capPosition;
+            incoming = capIncoming;
+            outgoing = capOutgoing;
+            up = capUp;
+            dv = capDistance;
+            vertexD = capDistance;
+            lengthBefore = capLengthBefore;
+            lengthAfter = capLengthAfter;
+            beforeStartsLine = capVertex == 1;
+            afterEndsLine = capVertex + 2 >= int(vertexCount);
+        } else if (precise) {
             // Only a vertex of this fragment's own segment: the nearest one may be elsewhere.
             bool startsOwn = mod(floor(nearVertex.w / nearVertexFlagBase), 2.0) > 0.5;
             bool endsOwn = mod(floor(nearVertex.w / (2.0 * nearVertexFlagBase)), 2.0) > 0.5;
@@ -354,9 +443,10 @@ czm_material czm_getMaterial(czm_materialInput materialInput)
         // part of the band beyond the vertex), GroundPolylinePrimitive clamps st.s to the vertex,
         // so d can't place stamps there. Tested exactly per pixel from the fragment's position;
         // a screen-space test of st.s changing would misclassify 2x2 pixel quads at the edge.
+        // A corner cap lies wholly outside both segments' own bands.
         vec3 offset = eyeCoordinate.xyz - vertexPosition;
-        bool pastOwnEnd = haveVertex
-            && (vertexAtEnd ? dot(offset, incoming) > 0.0 : dot(offset, outgoing) < 0.0);
+        bool pastOwnEnd = cap || (haveVertex
+            && (vertexAtEnd ? dot(offset, incoming) > 0.0 : dot(offset, outgoing) < 0.0));
 
         // This segment's stamps, measured along the line.
         if (!pastOwnEnd) {
@@ -402,6 +492,14 @@ const PRECISE_STEP_FRACTION = 64;
 // Smallest supported spacing multiplier; keep in sync with MIN_SPACING in the shader.
 const MIN_SPACING = 0.25;
 const REFINE_ITERATIONS = 3;
+// GroundPolylineGeometry stops mitering corners that turn by more than this (a 60-degree corner).
+const CAP_TURN = CesiumMath.toRadians(120);
+// A corner cap's geometry is this many times as wide as the line, so the shader can tell its
+// fragments apart (and the cap's sides have room to spare).
+const CAP_WIDTH_FACTOR = 2;
+// A corner cap runs this fraction of the shorter adjacent segment out from the vertex: it must
+// reach half a line width, and the corner is only a few pixels across once it doesn't.
+const CAP_LENGTH_FRACTION = 0.25;
 
 /**
  * Material that draws a patterned line with optional symbols on top, along a ground-clamped
@@ -458,6 +556,7 @@ export default class PolylinePatternMaterial {
           stampShift: 0,
           sizeScale: 1,
           lineLength: 1,
+          lineWidth: 1,
           preciseMetersPerPixel: 0,
           referenceA: new Cartesian4(),
           tangentA: new Cartesian4(),
@@ -569,6 +668,7 @@ export default class PolylinePatternMaterial {
    */
   static setPositions(material, positions, width) {
     material.lineWidth = width;
+    material.uniforms.lineWidth = width;
     const ellipsoid = Ellipsoid.WGS84;
     material.segments = [];
     let start = 0;
@@ -596,6 +696,44 @@ export default class PolylinePatternMaterial {
     material.vertices = computeVertices(material.segments);
     // Distance along the line of every vertex (both ends included), uploaded on next update.
     material.pendingVertexDistances = material.vertices.map((vertex) => vertex.distance);
+  }
+
+  /**
+   * The extra geometry for corners GroundPolylineGeometry doesn't miter (sharper than 60
+   * degrees, where it cuts both segments off square to the bisector and draws nothing outside
+   * the corner): one short line per such vertex, out along the bisector, to add to the same
+   * GroundPolylinePrimitive as further geometry instances with this material. The shader draws
+   * the corner in them (see the header). Call after
+   * {@link PolylinePatternMaterial.setPositions}.
+   *
+   * @param {Material} material
+   * @returns {{positions: Cartesian3[], width: number}[]}
+   */
+  static cornerCaps(material) {
+    const ellipsoid = Ellipsoid.WGS84;
+    const caps = [];
+    material.vertices.forEach((vertex, v) => {
+      if (!vertex.cap) {
+        return;
+      }
+      const vertices = material.vertices;
+      const length = CAP_LENGTH_FRACTION * Math.min(
+        vertex.distance - vertices[v - 1].distance,
+        vertices[v + 1].distance - vertex.distance,
+      );
+      const outward = Cartesian3.subtract(vertex.incoming, vertex.outgoing, new Cartesian3());
+      Cartesian3.normalize(outward, outward);
+      const end = Cartesian3.add(
+        vertex.position,
+        Cartesian3.multiplyByScalar(outward, length, outward),
+        new Cartesian3(),
+      );
+      caps.push({
+        positions: [vertex.position, ellipsoid.scaleToGeodeticSurface(end, end)],
+        width: CAP_WIDTH_FACTOR * material.lineWidth,
+      });
+    });
+    return caps;
   }
 
   /**
@@ -749,7 +887,8 @@ function setReference(reference, tangent, range, lineEnds, nearest, segmentCount
 
 /**
  * World-space frame of every vertex: position, distance along the line, direction of travel
- * arriving and leaving, and the ground's up. Only interior vertices join two segments.
+ * arriving and leaving, and the ground's up. Only interior vertices join two segments; a corner
+ * cap is needed where they turn by more than CAP_TURN.
  */
 function computeVertices(segments) {
   if (segments.length === 0) {
@@ -769,6 +908,8 @@ function computeVertices(segments) {
       up: Ellipsoid.WGS84.geodeticSurfaceNormal(position, new Cartesian3()),
       distance: after ? after.start : before.start + before.length,
       interior: Boolean(before && after),
+      // GroundPolylineGeometry doesn't miter this corner; see cornerCaps.
+      cap: Boolean(before && after) && Cartesian3.angleBetween(incoming, outgoing) > CAP_TURN,
     });
   }
   return vertices;
@@ -803,7 +944,7 @@ function updateVertexFrames(material, camera, modulus, segmentA, segmentB) {
   let nearestDistance = Infinity;
   vertices.forEach((vertex, v) => {
     const eye = Matrix4.multiplyByPoint(view, vertex.position, scratchVertexEye);
-    data.set([eye.x, eye.y, eye.z, vertex.interior ? 1 : 0], v * 4);
+    data.set([eye.x, eye.y, eye.z, vertex.cap ? 2 : vertex.interior ? 1 : 0], v * 4);
     const distance = Cartesian3.magnitude(eye); // the camera is the eye-space origin
     if (vertex.interior && candidates.includes(v) && distance < nearestDistance) {
       nearestDistance = distance;

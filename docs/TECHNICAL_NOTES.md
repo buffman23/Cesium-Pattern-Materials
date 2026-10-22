@@ -82,6 +82,25 @@ In the mitered wedge outside a corner, Cesium clamps `st.s` to the vertex. The w
 shows the image column at the vertex, extended until the two segments meet at the miter. For a
 solid line that's a clean miter join; a dash or a gap may end at a corner.
 
+**Corner caps.** Cesium doesn't miter corners sharper than 60° (`MITER_BREAK_SMALL` in
+`GroundPolylineGeometry`). It rotates the miter 90°, which cuts both segments off along one line
+through the vertex, square to the bisector, so nothing is drawn outside the corner and an image
+off the centre line (such as `line-bottom.svg`) is cut off there. `cornerCaps` returns an extra
+geometry instance per such vertex: a line from the vertex out along the bisector, a quarter of
+the shorter adjacent segment long, drawn twice the line width. The shader recognises its
+fragments by that width (`v_width` > 1.5 × the `lineWidth` uniform) and draws the corner from the
+vertex frame in eye space: nothing on the inner side of the cut (the line covers it), and on the
+outer side each segment extended up to its miter with a short bevel square to the bisector,
+clipped half a line width out. Each part shows the line image's column at the vertex, across
+its own direction, and both segments' stamps are drawn over the cap as in a mitered wedge.
+- The look jumps at 60°: just wider, Cesium's pointed miter (its tip a full line width out);
+  just sharper, the clipped cap (half a line width out).
+- Building the corner from extra vertices instead (a 1 cm bevel in the geometry) doesn't work:
+  Cesium merges points within 1e-10 radians (0.6 mm), and a segment that short gets a shadow
+  volume that folds over, so the corner vanished with the camera low and straight above it.
+- A cap shorter than half a line width on screen (adjacent segments under about two line widths
+  long) is cut short.
+
 **Stamp layer.** Stamps are drawn on top at a near-constant pixel size, anchored to the line.
 The spacing level comes from the repeat length, `stamp length × spacing`, so stamps sit 1–2
 repeat lengths apart. Odd-indexed stamps fade out as the level approaches the next power of two.

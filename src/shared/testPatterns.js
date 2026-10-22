@@ -8,6 +8,7 @@ export const LINE_IMAGES = {
   dashed: "/patterns/line-dashed.svg",
   wave: "/patterns/line-wave.svg",
   sawtooth: "/patterns/line-sawtooth.svg",
+  bottom: "/patterns/line-bottom.svg",
 };
 
 // Stamp images: symbols on a transparent background, drawn on top of the line.

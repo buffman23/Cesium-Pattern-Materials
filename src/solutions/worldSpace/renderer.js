@@ -96,17 +96,23 @@ export default async function createRenderer(viewer) {
     return clamp(extent / detail.polygonCells, detail.minPolygonGranularity, detail.maxPolygonGranularity);
   }
 
-  function groundLine(positions, width, material, loop = false) {
+  // `extraLines` ({ positions, width }[]) are drawn as further instances with the same material.
+  function groundLine(positions, width, material, loop = false, extraLines = []) {
+    const instance = (linePositions, lineWidth, lineLoop) =>
+      new GeometryInstance({
+        geometry: new GroundPolylineGeometry({
+          positions: linePositions,
+          width: lineWidth,
+          loop: lineLoop,
+          granularity: lineGranularity(linePositions, lineLoop),
+        }),
+      });
     return primitives.add(
       new GroundPolylinePrimitive({
-        geometryInstances: new GeometryInstance({
-          geometry: new GroundPolylineGeometry({
-            positions,
-            width,
-            loop,
-            granularity: lineGranularity(positions, loop),
-          }),
-        }),
+        geometryInstances: [
+          instance(positions, width, loop),
+          ...extraLines.map((line) => instance(line.positions, line.width, false)),
+        ],
         appearance: new PolylineMaterialAppearance({ material }),
         asynchronous: false,
       }),
@@ -155,7 +161,8 @@ export default async function createRenderer(viewer) {
     PolylinePatternMaterial.setPositions(state.material, state.positions, lineWidth);
     applyMaxHeight(state);
     PolylinePatternMaterial.updateCamera(state.material, scene);
-    replace(state, "primitive", groundLine(state.positions, lineWidth, state.material));
+    const caps = PolylinePatternMaterial.cornerCaps(state.material);
+    replace(state, "primitive", groundLine(state.positions, lineWidth, state.material, false, caps));
   }
 
   function updatePolygon(shape) {
