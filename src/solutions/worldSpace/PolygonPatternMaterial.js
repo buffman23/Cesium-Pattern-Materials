@@ -173,6 +173,16 @@ export default class PolygonPatternMaterial {
   }
 
   /**
+   * Changes the tile image.
+   *
+   * @param {Material} material
+   * @param {string|HTMLImageElement|HTMLCanvasElement} image Seamless tile image.
+   */
+  static setImage(material, image) {
+    material.uniforms.image = image;
+  }
+
+  /**
    * Anchors the pattern to an east-north-up frame on the ellipsoid surface below the center of
    * the given positions.
    *

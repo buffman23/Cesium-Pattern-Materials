@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- Seamless dot tile: one dot on each corner (clipped by the viewBox), so repeated tiles form
+       a square grid of whole dots. The dots of a tile twice the size land on dots of this one,
+       so the zoom cross-fade between the two scales blends cleanly. -->
+  <g fill="#ffffff">
+    <circle cx="0" cy="0" r="44" />
+    <circle cx="256" cy="0" r="44" />
+    <circle cx="0" cy="256" r="44" />
+    <circle cx="256" cy="256" r="44" />
+  </g>
+</svg>

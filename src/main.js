@@ -69,7 +69,7 @@ async function useSolution(id) {
   renderer.setLineWidth?.(lineWidth);
   renderer.setStampSpacing?.(stampSpacing);
   renderer.setMaxHeight?.({ factor: maxHeightFactor, easeFrom: maxHeightEaseFrom });
-  renderer.setImages?.({ line: lineImage, stamp: stampImage });
+  renderer.setImages?.({ line: lineImage, stamp: stampImage, polygon: polygonImage });
   // Re-render the existing shapes with the newly selected solution.
   for (const shape of drawTool.shapes) {
     if (shape.positions.length >= MIN_POINTS[shape.type]) {
@@ -217,18 +217,22 @@ viewer.scene.preRender.addEventListener(() => {
   }
 });
 
-// --- Line / stamp image comboboxes ("" = none) ----------------------------------------------
+// --- Line / stamp image comboboxes ("" = none) and polygon fill ----------------------------
 const lineImageSelect = document.getElementById("lineImage");
 const stampImageSelect = document.getElementById("stampImage");
+const polygonImageSelect = document.getElementById("polygonImage");
 let lineImage = lineImageSelect.value || null;
 let stampImage = stampImageSelect.value || null;
+let polygonImage = polygonImageSelect.value;
 
-function setImages({ line = lineImage, stamp = stampImage } = {}) {
+function setImages({ line = lineImage, stamp = stampImage, polygon = polygonImage } = {}) {
   lineImage = line;
   stampImage = stamp;
+  polygonImage = polygon;
   lineImageSelect.value = line ?? "";
   stampImageSelect.value = stamp ?? "";
-  renderer?.setImages?.({ line, stamp });
+  polygonImageSelect.value = polygon;
+  renderer?.setImages?.({ line, stamp, polygon });
   requestRender();
 }
 
@@ -236,6 +240,7 @@ lineImageSelect.addEventListener("change", () => setImages({ line: lineImageSele
 stampImageSelect.addEventListener("change", () =>
   setImages({ stamp: stampImageSelect.value || null }),
 );
+polygonImageSelect.addEventListener("change", () => setImages({ polygon: polygonImageSelect.value }));
 
 useSolution();
 
@@ -287,6 +292,7 @@ function exportState() {
     maxHeightEaseFrom,
     lineImage,
     stampImage,
+    polygonImage,
     canvas: [viewer.canvas.clientWidth, viewer.canvas.clientHeight],
     camera: {
       lon: CesiumMath.toDegrees(position.longitude),
@@ -332,8 +338,12 @@ async function importState(json) {
     const factor = state.maxHeightFactor ?? Infinity;
     setMaxHeight(factor, state.maxHeightEaseFrom ?? factor);
   }
-  if (state.lineImage !== undefined || state.stampImage !== undefined) {
-    setImages({ line: state.lineImage, stamp: state.stampImage });
+  if (
+    state.lineImage !== undefined ||
+    state.stampImage !== undefined ||
+    state.polygonImage !== undefined
+  ) {
+    setImages({ line: state.lineImage, stamp: state.stampImage, polygon: state.polygonImage });
   }
   drawTool.clear();
   for (const shape of state.shapes ?? []) {

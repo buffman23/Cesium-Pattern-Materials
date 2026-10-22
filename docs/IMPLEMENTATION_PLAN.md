@@ -78,6 +78,7 @@ and document these requirements in each file's comments:
     - Cesium's globe depth texture.
 - **PolygonPatternMaterial:**
   - `create({ image, color, tileSize, maxHeight, heightTransition })` returns a `Material`.
+  - `setImage(material, image)` swaps the tile image.
   - `setOrigin(material, positions)` must be called whenever the polygon's positions change.
   - `updateCamera(material, scene)` must be called **every frame**.
   - It must be rendered with a primitive whose material input provides `positionToEyeEC`, such
@@ -105,7 +106,7 @@ and document these requirements in each file's comments:
   | `line-dashed.svg`, `line-sawtooth.svg` | 128×128 | line |
   | `line-wave.svg` | 256×128 | line |
   | `x-symbol.svg`, `arrow-symbol.svg` | 256×128 | stamp |
-  | `hatch-45.svg` | 256×256 | polygon tile, seamless 45° hatch |
+  | `hatch-45.svg`, `dots.svg`, `checkers.svg` | 256×256 | polygon tiles: seamless 45° hatch, dots, checkerboard |
 
 ### Material rules that apply to every file
 
@@ -218,8 +219,11 @@ containing, in this order:
      (`dashed`), Wave (`wave`), Sawtooth (`sawtooth`) and Bottom (`bottom`);
    - `#stampImage` ("Stamp image"): options None (value empty), X (`x`, selected) and Arrow
      (`arrow`).
-7. A `div#hint` with the text "Pick a tool to start drawing."
-8. An empty `div#cameraHeight`.
+7. A second `div` with class `row` holding one `div` with a label and a select:
+   `#polygonImage` ("Polygon fill"): options Hatch (`hatch`, selected), Dots (`dots`) and
+   Checkers (`checkers`).
+8. A `div#hint` with the text "Pick a tool to start drawing."
+9. An empty `div#cameraHeight`.
 
 The three slider labels get the class `slider-label`. Step 9 looks every element up by its id,
 so keep the ids exactly. The select values are the keys of `LINE_IMAGES` and `STAMP_IMAGES`
@@ -236,9 +240,9 @@ so keep the ids exactly. The select values are the keys of `LINE_IMAGES` and `ST
 - Buttons are dark (`#3a3a3a` with a `#666` border, rounded, a little spacing between them). A
   button with the class `active`, the tool being drawn, is blue (`#2d6cdf` with a `#6aa0ff`
   border).
-- Labels are small (12px), grey (`#bbb`) and on their own line. The `.row` lays its two
-  selects out side by side with an 8px gap, each taking half the width; the selects are
-  full-width and styled like the buttons.
+- Labels are small (12px), grey (`#bbb`) and on their own line. A `.row` lays its selects out
+  side by side with an 8px gap, sharing the width equally (two selects take half each, one
+  takes it all); the selects are full-width and styled like the buttons.
 - The solution description and hint are small text. The value spans and `#cameraHeight` use a
   monospace font with tabular figures, so numbers don't jitter as they change. `#cameraHeight`
   has a thin top border separating it from the controls, and keeps line breaks in its text
@@ -356,6 +360,32 @@ tile so their caps never show:
 </svg>
 ```
 
+`dots.svg`: a dot on each corner, clipped by the viewBox, so repeated tiles form a square grid
+of whole dots. The dots of a tile twice the size land on dots of this one, so the zoom
+cross-fade between the two scales blends cleanly:
+
+```svg
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <g fill="#ffffff">
+    <circle cx="0" cy="0" r="44" />
+    <circle cx="256" cy="0" r="44" />
+    <circle cx="0" cy="256" r="44" />
+    <circle cx="256" cy="256" r="44" />
+  </g>
+</svg>
+```
+
+`checkers.svg`: a checkerboard, two filled squares on the diagonal and two left transparent:
+
+```svg
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <g fill="#ffffff">
+    <rect x="0" y="0" width="128" height="128" />
+    <rect x="128" y="128" width="128" height="128" />
+  </g>
+</svg>
+```
+
 ### 1.6 `src/shared/testPatterns.js`
 
 The demo's images and styling, used by Steps 7 and 9. It imports only `Color` from Cesium and
@@ -370,7 +400,8 @@ exports these constants:
 | `LINE_WIDTH` | 24 (pixels) |
 | `LINE_COLOR`, `STAMP_COLOR` | both the CSS color `#ffd400` (yellow), converted with `Color.fromCssColorString` |
 | `STAMP_SPACING` | 1 (stamp repeat as a multiple of the stamp length; 1 = touching) |
-| `HATCH_URL` | `/patterns/hatch-45.svg` |
+| `POLYGON_IMAGES` | an object mapping `hatch`, `dots` and `checkers` to `/patterns/hatch-45.svg`, `/patterns/dots.svg` and `/patterns/checkers.svg` |
+| `DEFAULT_POLYGON_IMAGE` | `"hatch"` |
 | `HATCH_TILE_PIXELS` | 48 (approximate tile size on screen) |
 | `HATCH_COLOR` | the CSS color `#00e5ff` (cyan) |
 
@@ -1141,7 +1172,7 @@ object with these methods:
 | `setDetail(settings)` | merges the given fields into the detail settings (7.3) and rebuilds every shape |
 | `setMaxHeight({ factor, easeFrom })` | sets the per-shape max height in fit heights (`Infinity` = off) and where easing starts, in the same units; omitted fields keep their value; no rebuild |
 | `setStampSpacing(spacing)` | writes the `spacing` uniform of every polyline material; no rebuild |
-| `setImages({ line, stamp })` | takes image keys from `LINE_IMAGES` / `STAMP_IMAGES`; `null` removes that layer and `undefined` keeps it; applies them to every polyline with `PolylinePatternMaterial.setImages` |
+| `setImages({ line, stamp, polygon })` | takes image keys from `LINE_IMAGES` / `STAMP_IMAGES` / `POLYGON_IMAGES`; for line and stamp, `null` removes that layer; `undefined` (or an unknown polygon key) keeps the current one; applies them to every polyline with `PolylinePatternMaterial.setImages` and every polygon with `PolygonPatternMaterial.setImage` |
 | `destroy()` | removes every shape, both frame listeners and the outline material |
 
 A shape is an object with an `id`, a `type` and `positions` (Cartesian3 points on the
@@ -1150,9 +1181,9 @@ ellipsoid).
 ### 7.2 Setup
 
 1. Before returning, load everything **in parallel** and wait for all of it: every line image,
-   every stamp image, the hatch image, and `GroundPrimitive.initializeTerrainHeights()`. Load an
-   image by creating an `Image`, setting its `src`, and awaiting its `decode()`. Keep the decoded
-   line and stamp images in objects keyed like `LINE_IMAGES` / `STAMP_IMAGES`. Every material
+   every stamp image, every polygon image, and `GroundPrimitive.initializeTerrainHeights()`.
+   Load an image by creating an `Image`, setting its `src`, and awaiting its `decode()`. Keep the
+   decoded images in objects keyed like `LINE_IMAGES` / `STAMP_IMAGES` / `POLYGON_IMAGES`. Every material
    shares these decoded images, so a new shape never waits for its own image load.
 2. Create one shared outline material: Cesium's built-in `Color` material type, white at 80%
    opacity.
@@ -1209,7 +1240,8 @@ one under that key.
 
 **Polygon:**
 1. The first time a shape id is seen, create its state with a new `PolygonPatternMaterial`,
-   using the hatch image, `HATCH_COLOR` and `HATCH_TILE_PIXELS`.
+   using the current polygon image (`DEFAULT_POLYGON_IMAGE` at first), `HATCH_COLOR` and
+   `HATCH_TILE_PIXELS`.
 2. Store the shape itself (so `setDetail` can rebuild it) and its bounding-box diagonal.
 3. Call `setOrigin` with the positions, apply the max height, and call `updateCamera`.
 4. Replace the state's `primitive` with a new `GroundPrimitive`:
@@ -1402,8 +1434,8 @@ missing. Call `useSolution()` once at startup, after the controls below are set 
   compute `fitMaxHeight` from the shape's bounding-box diagonal and the current settings, then
   `sizeScale` from the camera height, and pass that to `setHandleScale` for that shape. Handles
   then shrink with each shape's patterns.
-- **Image selects:** an empty value means `null`. On change, pass the line and stamp keys to the
-  renderer's `setImages`.
+- **Image selects:** an empty value means `null`. On change, pass the line, stamp and polygon
+  keys to the renderer's `setImages`.
 - **Camera height readout:** after each frame, show "Camera height: " followed by the height
   with two decimals in meters below 10 m, one decimal in meters below 1 km, and otherwise in
   kilometres with two decimals (formatted for the locale). On a second line, show the
@@ -1421,7 +1453,7 @@ getter for the current renderer.
   worked) and returns it. It contains:
   - the solution id, line width and stamp spacing;
   - the max height factor (`null` when off, since JSON has no infinity) and its ease start;
-  - the line and stamp image keys;
+  - the line, stamp and polygon image keys;
   - the canvas width and height;
   - the camera: longitude and latitude in degrees, height in meters, and heading, pitch and roll
     in radians;

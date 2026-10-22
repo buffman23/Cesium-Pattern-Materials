@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- Seamless checkerboard tile: two filled squares on the diagonal, two left transparent. -->
+  <g fill="#ffffff">
+    <rect x="0" y="0" width="128" height="128" />
+    <rect x="128" y="128" width="128" height="128" />
+  </g>
+</svg>

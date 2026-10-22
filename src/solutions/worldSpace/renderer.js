@@ -19,13 +19,14 @@ import PolylinePatternMaterial from "./PolylinePatternMaterial.js";
 import PolygonPatternMaterial from "./PolygonPatternMaterial.js";
 import {
   DEFAULT_LINE_IMAGE,
+  DEFAULT_POLYGON_IMAGE,
   DEFAULT_STAMP_IMAGE,
   HATCH_COLOR,
   HATCH_TILE_PIXELS,
-  HATCH_URL,
   LINE_COLOR,
   LINE_IMAGES,
   LINE_WIDTH,
+  POLYGON_IMAGES,
   STAMP_COLOR,
   STAMP_IMAGES,
   STAMP_SPACING,
@@ -44,10 +45,10 @@ export default async function createRenderer(viewer) {
   // synchronously (asynchronous: false), which keeps editing flicker free.
   // Load and decode the pattern images once; every shape's material shares them, so new shapes
   // don't each wait for their own image load.
-  const [lineImages, stampImages, hatchImage] = await Promise.all([
+  const [lineImages, stampImages, polygonImages] = await Promise.all([
     loadImages(LINE_IMAGES),
     loadImages(STAMP_IMAGES),
-    loadImage(HATCH_URL),
+    loadImages(POLYGON_IMAGES),
     GroundPrimitive.initializeTerrainHeights(),
   ]);
 
@@ -63,6 +64,7 @@ export default async function createRenderer(viewer) {
   let fitEaseFrom = 0;
   let lineImageKey = DEFAULT_LINE_IMAGE; // a key of LINE_IMAGES, or null for no line
   let stampImageKey = DEFAULT_STAMP_IMAGE; // a key of STAMP_IMAGES, or null for no stamps
+  let polygonImageKey = DEFAULT_POLYGON_IMAGE; // a key of POLYGON_IMAGES
   const lineImageFor = (key) => (key ? lineImages[key] : null);
   const stampImageFor = (key) => (key ? stampImages[key] : null);
 
@@ -170,7 +172,7 @@ export default async function createRenderer(viewer) {
     if (!state) {
       state = {
         polygonMaterial: PolygonPatternMaterial.create({
-          image: hatchImage,
+          image: polygonImages[polygonImageKey],
           color: HATCH_COLOR,
           tileSize: HATCH_TILE_PIXELS,
         }),
@@ -299,15 +301,18 @@ export default async function createRenderer(viewer) {
       }
     },
     /**
-     * Sets the line and/or stamp image by key (see LINE_IMAGES / STAMP_IMAGES); null removes
-     * that layer, undefined leaves it unchanged.
+     * Sets the line, stamp and/or polygon fill image by key (see LINE_IMAGES / STAMP_IMAGES /
+     * POLYGON_IMAGES); null removes the line or stamp layer, undefined leaves it unchanged.
      */
-    setImages({ line, stamp } = {}) {
+    setImages({ line, stamp, polygon } = {}) {
       if (line !== undefined) {
         lineImageKey = line;
       }
       if (stamp !== undefined) {
         stampImageKey = stamp;
+      }
+      if (polygon !== undefined && polygonImages[polygon]) {
+        polygonImageKey = polygon;
       }
       for (const state of rendered.values()) {
         if (state.material) {
@@ -315,6 +320,9 @@ export default async function createRenderer(viewer) {
             lineImage: lineImageFor(lineImageKey),
             stampImage: stampImageFor(stampImageKey),
           });
+        }
+        if (state.polygonMaterial) {
+          PolygonPatternMaterial.setImage(state.polygonMaterial, polygonImages[polygonImageKey]);
         }
       }
     },

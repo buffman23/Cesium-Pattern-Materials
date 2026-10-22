@@ -5,8 +5,9 @@ A small CesiumJS + Vite app for developing two custom `Cesium.Material`s:
 - **PolylinePatternMaterial** draws a patterned line with optional symbols on top. It takes two
   optional images: a **line image**, one seamless period of the line (solid, dashed, wave,
   sawtooth …), and a **stamp image**, a symbol such as an "X" or an arrow.
-- **PolygonPatternMaterial** fills a polygon with a repeating image tile. The test tile is a
-  seamless 45° hatch (`public/patterns/hatch-45.svg`).
+- **PolygonPatternMaterial** fills a polygon with a repeating image tile. The test tiles are a
+  seamless 45° hatch, dots and a checkerboard (`public/patterns/hatch-45.svg`, `dots.svg`,
+  `checkers.svg`), chosen with the "Polygon fill" select.
 
 Both patterns are **anchored to the ground**, so they don't slide when the camera moves. They also
 keep a **near-constant size on screen at any zoom**, from orbit down to Cesium's 1 m minimum
@@ -94,6 +95,6 @@ src/shared/
   zoomSettle.js                          Keeps zoom cross-fades from resting half faded
   maxHeight.js                           Max camera height soft cap, fitted to a shape
   testPatterns.js                        Test images, colors, line width and tile size
-public/patterns/                         Line, stamp and hatch test images (SVG)
+public/patterns/                         Line, stamp and polygon fill test images (SVG)
 docs/                                    Technical notes and a step-by-step rebuild plan
 ```

@@ -24,6 +24,13 @@ export const LINE_COLOR = Color.fromCssColorString("#ffd400");
 export const STAMP_COLOR = Color.fromCssColorString("#ffd400");
 export const STAMP_SPACING = 1; // stamp repeat as a multiple of the stamp length (1 = touching)
 
-export const HATCH_URL = "/patterns/hatch-45.svg"; // 256 x 256
+// Polygon fill images: seamless 256 x 256 tiles, repeated across the polygon.
+export const POLYGON_IMAGES = {
+  hatch: "/patterns/hatch-45.svg",
+  dots: "/patterns/dots.svg",
+  checkers: "/patterns/checkers.svg",
+};
+
+export const DEFAULT_POLYGON_IMAGE = "hatch";
 export const HATCH_TILE_PIXELS = 48; // approximate on-screen tile size
 export const HATCH_COLOR = Color.fromCssColorString("#00e5ff");
