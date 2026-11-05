@@ -470,11 +470,13 @@ export default class ShapeEditor {
     for (const shape of this.shapes) {
       loading = shape._updateFrame(this.scene, cullingVolume) || loading;
     }
+    // Marker images (SVG data URIs, custom URLs) load asynchronously too.
+    loading ||= Boolean(this.selected?.markers?.loading || this.drawing?.markers?.loading);
     this._loading = loading;
   }
 
   #onPostRender() {
-    // Keep rendering while pattern images are still turning into textures.
+    // Keep rendering while pattern or marker images are still loading.
     if (this._loading || this._dirty.size > 0) {
       this.scene.requestRender();
     }

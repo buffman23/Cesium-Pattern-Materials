@@ -17,8 +17,9 @@ import { withHeight } from "./geodesy.js";
  *                    black outline). width / height: its size in pixels (default 12 x 12).
  *  - color / activeColor / hoverColor: tints (default white / yellow / light blue).
  *  - scale:          multiplies every marker's size (default 1).
- *  - deletable:      vertex markers get a red X (shown on hover / after a click) that deletes
- *                    the vertex. deleteImage / deleteOffset (pixels) change it.
+ *  - deletable:      vertex markers get a red X that deletes the vertex. It appears when the
+ *                    marker is hovered or clicked and stays until another marker is hovered.
+ *                    deleteImage / deleteOffset (pixels) change it.
  *  - numbered:       vertex markers are numbered pins (PinBuilder). pinColor / pinSize.
  *  - translatable:   shows a translate marker that moves the whole shape. translateImage.
  *  - groundLine:     at altitude, draws a line from each marker straight down to the ground.
@@ -59,86 +60,54 @@ function imageId(image) {
   return id;
 }
 
-function canvas(size, draw) {
-  const c = document.createElement("canvas");
-  c.width = size;
-  c.height = size;
-  draw(c.getContext("2d"), size);
-  return c;
-}
+// The default images are inline SVGs (data URIs), so the library needs no asset files. Their
+// intrinsic size, which is what Cesium rasterizes into the billboard atlas, is twice the
+// drawn size, so they stay sharp on high-DPI screens; billboards set the drawn size.
+const svgImage = (svg) => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 
-let squareImage;
-/** White square with a thin black outline (tint it with the billboard color). */
+const SQUARE_SVG = svgImage(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">' +
+    '<rect width="24" height="24" fill="#000"/>' +
+    '<rect x="2" y="2" width="20" height="20" fill="#fff"/>' +
+    "</svg>",
+);
+
+const DELETE_SVG = svgImage(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 36 36">' +
+    '<path d="M8 8L28 28M28 8L8 28" stroke="#e01b24" stroke-width="6" stroke-linecap="round"/>' +
+    "</svg>",
+);
+
+// Four-way arrows: a black outline stroke under a white one.
+const ARROWS_PATH =
+  "M4 20H36M20 4V36" +
+  "M31 15L36 20L31 25M9 15L4 20L9 25" +
+  "M15 31L20 36L25 31M15 9L20 4L25 9";
+const TRANSLATE_SVG = svgImage(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 40 40">' +
+    `<path d="${ARROWS_PATH}" fill="none" stroke="#000" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>` +
+    `<path d="${ARROWS_PATH}" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>` +
+    "</svg>",
+);
+
+/** White square with a thin black outline (tint it with the billboard color); an SVG data URI. */
 export function defaultMarkerImage() {
-  squareImage ??= canvas(24, (ctx, s) => {
-    ctx.fillStyle = "#000";
-    ctx.fillRect(0, 0, s, s);
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(2, 2, s - 4, s - 4);
-  });
-  return squareImage;
+  return SQUARE_SVG;
 }
 
-let deleteImage;
-/** Red X on a white disc. */
+/** Red X; an SVG data URI. */
 export function defaultDeleteImage() {
-  deleteImage ??= canvas(32, (ctx, s) => {
-    const r = s / 2;
-    ctx.beginPath();
-    ctx.arc(r, r, r - 1.5, 0, Math.PI * 2);
-    ctx.fillStyle = "#fff";
-    ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = "#222";
-    ctx.stroke();
-    ctx.beginPath();
-    const d = s * 0.27;
-    ctx.moveTo(r - d, r - d);
-    ctx.lineTo(r + d, r + d);
-    ctx.moveTo(r + d, r - d);
-    ctx.lineTo(r - d, r + d);
-    ctx.lineWidth = 5;
-    ctx.lineCap = "round";
-    ctx.strokeStyle = "#e01b24";
-    ctx.stroke();
-  });
-  return deleteImage;
+  return DELETE_SVG;
 }
 
-let translateImage;
-/** Four-way move arrows, white with a black outline. */
+/** Four-way move arrows, white with a black outline; an SVG data URI. */
 export function defaultTranslateImage() {
-  translateImage ??= canvas(40, (ctx, s) => {
-    const c = s / 2;
-    const arm = s * 0.42;
-    const head = s * 0.16;
-    ctx.beginPath();
-    ctx.moveTo(c - arm, c);
-    ctx.lineTo(c + arm, c);
-    ctx.moveTo(c, c - arm);
-    ctx.lineTo(c, c + arm);
-    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-      const tipX = c + dx * arm;
-      const tipY = c + dy * arm;
-      ctx.moveTo(tipX - dx * head - dy * head, tipY - dy * head - dx * head);
-      ctx.lineTo(tipX, tipY);
-      ctx.lineTo(tipX - dx * head + dy * head, tipY - dy * head + dx * head);
-    }
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.strokeStyle = "#000";
-    ctx.lineWidth = 7;
-    ctx.stroke();
-    ctx.strokeStyle = "#fff";
-    ctx.lineWidth = 3;
-    ctx.stroke();
-  });
-  return translateImage;
+  return TRANSLATE_SVG;
 }
 
 const pinBuilder = new PinBuilder();
 const pins = new Map();
-/** Numbered pin, cached per text, color and size. */
+/** Numbered pin (a canvas: PinBuilder draws pins on canvases), cached per text, color, size. */
 export function numberedPinImage(text, color, size) {
   const key = `${text}|${color.toCssColorString()}|${size}`;
   let pin = pins.get(key);
@@ -174,6 +143,19 @@ export class MarkerSet {
 
   spec(key) {
     return this.specs.get(key);
+  }
+
+  /**
+   * True while a shown billboard's image is still loading (SVGs and URLs load
+   * asynchronously); the editor keeps requesting frames until then, for requestRenderMode.
+   */
+  get loading() {
+    for (const billboard of this.markers.values()) {
+      if (!billboard.ready) {
+        return true;
+      }
+    }
+    return Boolean(this.deleteBillboard?.show && !this.deleteBillboard.ready);
   }
 
   /** Creates, moves or removes billboards to match the specs. */
@@ -215,17 +197,26 @@ export class MarkerSet {
     this.editor.scene.requestRender();
   }
 
+  /**
+   * The marker under the pointer (or undefined). Hovering a marker also makes it the one whose
+   * X shows; moving off it keeps the X, so the pointer can travel to the X without it
+   * vanishing, until another marker is hovered.
+   */
   setHover(key) {
     if (key === this.hoverKey) {
       return;
     }
     const previous = this.hoverKey;
     this.hoverKey = key;
+    if (key !== undefined) {
+      this.selectedKey = key;
+    }
     this.#restyle(previous);
     this.#restyle(key);
     this.#syncDelete();
   }
 
+  /** Makes `key` the marker whose X shows (undefined hides the X). */
   setSelected(key) {
     if (key === this.selectedKey) {
       return;
@@ -313,7 +304,8 @@ export class MarkerSet {
   }
 
   #syncDelete() {
-    const key = this.hoverKey ?? this.selectedKey;
+    // The last hovered or clicked marker (see setHover), not only the one under the pointer.
+    const key = this.selectedKey;
     const spec = key && this.specs.get(key);
     const show = Boolean(spec?.deletable) && this.activeKey === undefined;
     if (!show) {
