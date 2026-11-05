@@ -26,6 +26,7 @@ import {
   HATCH_TILE_PIXELS,
   LINE_COLOR,
   LINE_IMAGES,
+  LINE_WIDTH,
   POLYGON_IMAGES,
   STAMP_COLOR,
   STAMP_IMAGES,
@@ -64,6 +65,27 @@ const COLORS = {
   cyan: Color.fromCssColorString("#00e5ff").withAlpha(0.35),
 };
 
+// Load and decode the pattern images once (like renderer.js), so every pattern material shares
+// them and new shapes don't each wait for their own image load.
+async function loadImages(urls) {
+  const entries = await Promise.all(
+    Object.entries(urls).map(async ([key, url]) => {
+      const image = new Image();
+      image.src = url;
+      await image.decode();
+      return [key, image];
+    }),
+  );
+  return Object.fromEntries(entries);
+}
+const [lineImages, stampImages, polygonImages] = await Promise.all([
+  loadImages(LINE_IMAGES),
+  loadImages(STAMP_IMAGES),
+  loadImages(POLYGON_IMAGES),
+]);
+
+const isPatternLine = (value) => value.startsWith("pattern:");
+
 const specs = new Map();
 function materialFor(value, kind) {
   if (value === "none") {
@@ -82,8 +104,8 @@ function materialFor(value, kind) {
     const [line, stamp] = key.split("+");
     spec = patternLineMaterial(
       {
-        lineImage: LINE_IMAGES[line] ?? null,
-        stampImage: STAMP_IMAGES[stamp] ?? null,
+        lineImage: lineImages[line] ?? null,
+        stampImage: stampImages[stamp] ?? null,
         lineColor: LINE_COLOR,
         stampColor: STAMP_COLOR,
       },
@@ -91,7 +113,7 @@ function materialFor(value, kind) {
     );
   } else {
     spec = patternFillMaterial(
-      { image: POLYGON_IMAGES[key], color: HATCH_COLOR, tileSize: HATCH_TILE_PIXELS },
+      { image: polygonImages[key], color: HATCH_COLOR, tileSize: HATCH_TILE_PIXELS },
       { json: { type: "pattern", kind, value } },
     );
   }
@@ -203,10 +225,27 @@ controls.outlineWidth.addEventListener(
   "change",
   onSelected((s) => s.setOutlineWidth(Number(controls.outlineWidth.value) || 2)),
 );
-controls.outlineMaterial.addEventListener(
-  "change",
-  onSelected((s) => s.setOutlineMaterial(materialFor(controls.outlineMaterial.value, "outline"))),
-);
+// Pattern lines draw their images as tall as the line is wide, so they need a wide line (the
+// main demo uses LINE_WIDTH, 24 px); at a color outline's 3 px they're barely visible. Picking
+// a pattern widens a narrower outline to LINE_WIDTH; going back to a color restores the width.
+let colorOutlineWidth = Number(controls.outlineWidth.value) || 3;
+let patternSelected = isPatternLine(controls.outlineMaterial.value);
+controls.outlineMaterial.addEventListener("change", () => {
+  const pattern = isPatternLine(controls.outlineMaterial.value);
+  const width = Number(controls.outlineWidth.value) || 2;
+  if (pattern && !patternSelected && width < LINE_WIDTH) {
+    colorOutlineWidth = width;
+    controls.outlineWidth.value = String(LINE_WIDTH);
+  } else if (!pattern && patternSelected && width === LINE_WIDTH) {
+    controls.outlineWidth.value = String(colorOutlineWidth);
+  }
+  patternSelected = pattern;
+  const shape = editor.selected;
+  if (shape) {
+    shape.setOutlineMaterial(materialFor(controls.outlineMaterial.value, "outline"));
+    shape.setOutlineWidth(Number(controls.outlineWidth.value) || 2);
+  }
+});
 controls.fillMaterial.addEventListener(
   "change",
   onSelected((s) => {

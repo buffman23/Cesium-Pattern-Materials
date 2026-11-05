@@ -76,6 +76,9 @@ export function cesiumMaterial(material, { tint = Color.WHITE, json } = {}) {
  * Patterned ground line (PolylinePatternMaterial). Options are those of
  * PolylinePatternMaterial.create, plus `maxHeightFactor` / `easeFrom` (max camera height in
  * fit heights of each line, see maxHeight.js; default off). Ground-clamped shapes only.
+ *
+ * The images are drawn as tall as the line is wide, so use a wide outline (the main demo uses
+ * 24 px): at a few pixels the pattern shrinks to a faint dotted line.
  */
 export function patternLineMaterial(options = {}, { json } = {}) {
   const { maxHeightFactor = Infinity, easeFrom = 0, ...materialOptions } = options;
