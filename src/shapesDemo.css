@@ -1,0 +1,31 @@
+#toolbar select,
+#toolbar input[type="number"] {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px;
+  border: 1px solid #666;
+  border-radius: 4px;
+  background: #3a3a3a;
+  color: #eee;
+}
+
+#toolbar .checks {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 8px;
+  margin-bottom: 6px;
+}
+
+#toolbar .checks label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  color: #ddd;
+}
+
+#selection {
+  font-size: 12px;
+  color: #9fc4ff;
+  margin-top: 4px;
+}

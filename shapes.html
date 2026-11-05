@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cesium Shapes</title>
+    <link rel="stylesheet" href="/src/style.css" />
+    <link rel="stylesheet" href="/src/shapesDemo.css" />
+  </head>
+  <body>
+    <div id="cesiumContainer"></div>
+    <div id="toolbar">
+      <div class="buttons">
+        <button data-shape="Polyline">Polyline</button>
+        <button data-shape="Polygon">Polygon</button>
+        <button data-shape="Corridor">Corridor</button>
+        <button data-shape="Circle">Circle</button>
+        <button data-shape="Rectangle">Rectangle</button>
+        <button data-shape="Sector">Sector</button>
+      </div>
+      <div class="buttons">
+        <button id="btnDelete">Delete selected</button>
+        <button id="btnClear">Clear</button>
+      </div>
+      <div class="row">
+        <div>
+          <label for="arcType">Arc type</label>
+          <select id="arcType">
+            <option value="GEODESIC" selected>Geodesic</option>
+            <option value="RHUMB">Rhumb</option>
+          </select>
+        </div>
+        <div>
+          <label for="outlineWidth">Outline width (px)</label>
+          <input id="outlineWidth" type="number" min="1" max="64" value="3" />
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label for="outlineMaterial">Outline</label>
+          <select id="outlineMaterial">
+            <option value="color:white" selected>White</option>
+            <option value="color:yellow">Yellow</option>
+            <option value="pattern:solid">Pattern: solid</option>
+            <option value="pattern:dashed">Pattern: dashed</option>
+            <option value="pattern:dashed+arrow">Pattern: dashed + arrows</option>
+            <option value="pattern:wave">Pattern: wave</option>
+          </select>
+        </div>
+        <div>
+          <label for="fillMaterial">Fill</label>
+          <select id="fillMaterial">
+            <option value="color:white" selected>White 25%</option>
+            <option value="color:cyan">Cyan 35%</option>
+            <option value="pattern:hatch">Pattern: hatch</option>
+            <option value="pattern:dots">Pattern: dots</option>
+            <option value="pattern:checkers">Pattern: checkers</option>
+            <option value="none">None</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label for="height">Height (m, altitude only)</label>
+          <input id="height" type="number" min="0" step="100" value="5000" />
+        </div>
+        <div>
+          <label for="corridorWidth">Corridor width (m)</label>
+          <input id="corridorWidth" type="number" min="1" step="100" value="2000" />
+        </div>
+      </div>
+      <div class="checks">
+        <label><input id="clampToGround" type="checkbox" checked /> Clamp to ground</label>
+        <label><input id="deletable" type="checkbox" checked /> Deletable vertices</label>
+        <label><input id="numbered" type="checkbox" /> Numbered markers</label>
+        <label><input id="translatable" type="checkbox" checked /> Translate marker</label>
+        <label><input id="groundLine" type="checkbox" /> Ground lines</label>
+      </div>
+      <div id="hint">Pick a shape to start drawing.</div>
+      <div id="selection"></div>
+    </div>
+    <script type="module" src="/src/shapesDemo.js"></script>
+  </body>
+</html>

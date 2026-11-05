@@ -81,6 +81,42 @@ are in [`docs/TECHNICAL_NOTES.md`](docs/TECHNICAL_NOTES.md).
 assumed to be the ellipsoid (no terrain); stamps taller than the line width are clipped; and
 `src/shared/mipmapTexture.js` relies on private Cesium fields.
 
+## Shape library (`src/shapes/`)
+
+A separate demo at **`/shapes.html`** (`src/shapesDemo.js`) shows a reusable drawing and
+editing library. It has a `Shape` base class and these subclasses: `Polyline`, `Polygon`,
+`Corridor` (all three extend `VertexShape`), `Circle`, `Rectangle` and `Sector`.
+
+```js
+import { ShapeEditor, Polygon, Circle, patternFillMaterial } from "./src/shapes/index.js";
+
+const editor = await ShapeEditor.create(viewer);          // one per viewer
+editor.startDrawing(Polygon, {
+  arcType: ArcType.RHUMB,                                  // or GEODESIC (default)
+  outline: { material: Color.YELLOW, width: 3 },           // Color, Cesium Material or spec
+  fill: { material: patternFillMaterial({ image, color }) },
+  markers: { numbered: true, deletable: true },            // see DEFAULT_MARKER_OPTIONS
+  clampToGround: false, height: 5000,                      // at altitude
+});
+editor.selected?.toJSON();                                 // Shape.fromJSON(json) restores it
+```
+
+- **Modes:** a shape starts in DRAW_MODE. When it is finished it enters EDIT_MODE, where
+  markers can be dragged. Clicking empty globe or pressing Esc makes it IDLE, and clicking it
+  edits it again.
+- **Markers:** white squares by default; the image can be changed. Vertex markers can be
+  deletable (a red X shows on hover or click) or numbered pins (PinBuilder). A translate
+  marker moves the whole shape. At altitude, shift+drag changes height.
+- **Performance:** a changed shape is rebuilt at most once per frame, and coarser while it is
+  being drawn or dragged. A whole shape is one fill primitive plus its outline primitives.
+  Only the shape being edited has billboards. Per-frame material updates skip shapes outside
+  the view.
+- **Materials:** the pattern materials only work on ground-clamped shapes. At altitude they
+  fall back to a solid color.
+- **Subclassing:** implement `outlineLines()` (any number of lines, each with a material
+  key), `createFillGeometry()`, `markerSpecs()` and `onMarkerDrag()`. The class comments in
+  `Shape.js` and `VertexShape.js` list every hook.
+
 ## Project layout
 
 ```
@@ -95,6 +131,8 @@ src/shared/
   zoomSettle.js                          Keeps zoom cross-fades from resting half faded
   maxHeight.js                           Max camera height soft cap, fitted to a shape
   testPatterns.js                        Test images, colors, line width and tile size
+shapes.html, src/shapesDemo.js           Shape library demo
+src/shapes/                              Shape classes, ShapeEditor, markers, materials, geodesy
 public/patterns/                         Line, stamp and polygon fill test images (SVG)
 docs/                                    Technical notes and a step-by-step rebuild plan
 ```
