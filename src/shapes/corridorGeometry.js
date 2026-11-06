@@ -200,7 +200,11 @@ export function corridorLayout({ centers, radii, minAltitudes, maxAltitudes, arc
   }
   const scale = Math.max(...hulls.flat().map((p) => Math.hypot(p[0], p[1])), 1);
   const tolerance = scale * 1e-7;
-  const step = Math.max(scale / (interactive ? 96 : 384), 1);
+  // Ring subdivision. Straight edges in the plane are already exact geodesics / rhumb lines,
+  // so points are only needed for the earth's curvature at altitude and for sloping heights:
+  // 1/96 of the corridor's size (a wall between two points sags ~50 m at 5000 km across).
+  // Denser rings cost a lot (edges, surfaces and Cesium all scale with the point count).
+  const step = Math.max(scale / (interactive ? 48 : 96), 1);
 
   const asPolygon = (ring) => [closed(ring)];
   const footprint = polygonClipping.union(...hulls.map(asPolygon));
@@ -243,8 +247,23 @@ export function corridorLayout({ centers, radii, minAltitudes, maxAltitudes, arc
     }
     return inside;
   };
-  const pieceContains = (piece, p) =>
-    piece.multi.some((polygon) => inRing(polygon[0], p) && !polygon.slice(1).some((hole) => inRing(hole, p)));
+  // Bounding boxes first: most points tested are far outside most pieces.
+  for (const piece of pieces) {
+    const outer = piece.multi.flatMap((polygon) => polygon[0]);
+    piece.box = outer.length
+      ? [
+          Math.min(...outer.map((q) => q[0])),
+          Math.min(...outer.map((q) => q[1])),
+          Math.max(...outer.map((q) => q[0])),
+          Math.max(...outer.map((q) => q[1])),
+        ]
+      : [Infinity, Infinity, -Infinity, -Infinity];
+  }
+  const pieceContains = (piece, p) => {
+    const [x0, y0, x1, y1] = piece.box;
+    if (p[0] < x0 || p[0] > x1 || p[1] < y0 || p[1] > y1) return false;
+    return piece.multi.some((polygon) => inRing(polygon[0], p) && !polygon.slice(1).some((hole) => inRing(hole, p)));
+  };
 
   // Heights of a piece at a plane point: { floor, ceil }.
   const stepMode = altitudeMode === "step";
@@ -290,6 +309,19 @@ export function corridorLayout({ centers, radii, minAltitudes, maxAltitudes, arc
       for (const polygon of piece.multi) {
         for (const ring of polygon) {
           const points = densifyRing(open(ring), step);
+          // Per point: this piece's heights, and each (point, height) unprojected only once
+          // (walls and outlines share them; unprojecting is the expensive part).
+          const own = points.map((p) => pieceHeights(piece, p));
+          const cache = new Map();
+          const at = (k, height) => {
+            const key = `${k}|${height}`;
+            let position = cache.get(key);
+            if (!position) {
+              position = plane.unproject(points[k], height);
+              cache.set(key, position);
+            }
+            return position;
+          };
           let top = [];
           let bottom = [];
           const flush = () => {
@@ -298,8 +330,9 @@ export function corridorLayout({ centers, radii, minAltitudes, maxAltitudes, arc
             bottom = [];
           };
           for (let k = 0; k < points.length; k++) {
+            const kb = (k + 1) % points.length;
             const a = points[k];
-            const b = points[(k + 1) % points.length];
+            const b = points[kb];
             const length = dist(a, b);
             if (!(length > 0)) continue;
             // A point just across the edge, on the side away from this piece.
@@ -309,16 +342,16 @@ export function corridorLayout({ centers, radii, minAltitudes, maxAltitudes, arc
             const q1 = [m[0] + nx, m[1] + ny];
             const across = pieceContains(piece, q1) ? [m[0] - nx, m[1] - ny] : q1;
             const other = near.find((o) => pieceContains(o, across));
-            const ha = pieceHeights(piece, a);
-            const hb = pieceHeights(piece, b);
+            const ha = own[k];
+            const hb = own[kb];
             if (!other) {
-              quads.push([{ p: a, ...ha }, { p: b, ...hb }]);
+              quads.push([at(k, ha.floor), at(k, ha.ceil), at(kb, hb.floor), at(kb, hb.ceil)]);
               if (top.length === 0) {
-                top.push(plane.unproject(a, ha.ceil));
-                bottom.push(plane.unproject(a, ha.floor));
+                top.push(at(k, ha.ceil));
+                bottom.push(at(k, ha.floor));
               }
-              top.push(plane.unproject(b, hb.ceil));
-              bottom.push(plane.unproject(b, hb.floor));
+              top.push(at(kb, hb.ceil));
+              bottom.push(at(kb, hb.floor));
               continue;
             }
             flush();
@@ -328,8 +361,10 @@ export function corridorLayout({ centers, radii, minAltitudes, maxAltitudes, arc
             for (const key of ["ceil", "floor"]) {
               if (Math.abs(ha[key] - oa[key]) > STEP_TOLERANCE || Math.abs(hb[key] - ob[key]) > STEP_TOLERANCE) {
                 quads.push([
-                  { p: a, floor: Math.min(ha[key], oa[key]), ceil: Math.max(ha[key], oa[key]) },
-                  { p: b, floor: Math.min(hb[key], ob[key]), ceil: Math.max(hb[key], ob[key]) },
+                  at(k, Math.min(ha[key], oa[key])),
+                  at(k, Math.max(ha[key], oa[key])),
+                  at(kb, Math.min(hb[key], ob[key])),
+                  at(kb, Math.max(hb[key], ob[key])),
                 ]);
               }
             }
@@ -369,7 +404,7 @@ export function corridorLayout({ centers, radii, minAltitudes, maxAltitudes, arc
         }
       }
     }
-    const walls = wallGeometry(pieceEdges().quads, plane);
+    const walls = wallGeometry(pieceEdges().quads);
     if (walls) geometries.push(walls);
     return geometries;
   }
@@ -380,8 +415,9 @@ export function corridorLayout({ centers, radii, minAltitudes, maxAltitudes, arc
   return { footprintPolygons, footprintPoints, volumeOutlines, volumeGeometries };
 }
 
-// Vertical quads [{ p, floor, ceil }, { p, floor, ceil }] as one geometry (position, normal, st).
-function wallGeometry(quads, plane) {
+// Vertical quads [aBottom, aTop, bBottom, bTop] (Cartesian3) as one geometry (position,
+// normal, st).
+function wallGeometry(quads) {
   if (quads.length === 0) {
     return undefined;
   }
@@ -392,13 +428,7 @@ function wallGeometry(quads, plane) {
   const up = new Cartesian3();
   const along = new Cartesian3();
   const normal = new Cartesian3();
-  quads.forEach(([a, b], q) => {
-    const corners = [
-      plane.unproject(a.p, a.floor),
-      plane.unproject(a.p, a.ceil),
-      plane.unproject(b.p, b.floor),
-      plane.unproject(b.p, b.ceil),
-    ];
+  quads.forEach((corners, q) => {
     ellipsoid.geodeticSurfaceNormal(corners[0], up);
     Cartesian3.subtract(corners[2], corners[0], along);
     Cartesian3.cross(along, up, normal);
