@@ -100,10 +100,21 @@ export default class VertexShape extends Shape {
     this.positions = points;
   }
 
+  /**
+   * Single-height shapes (Corridor): every vertex gets the new height. Shapes whose vertices
+   * keep their own heights (Polyline, Polygon): `height` is the shape's base height, and
+   * changing it moves every vertex up or down by the same amount, keeping their differences
+   * (heights stop at 0). Used by shift+dragging the translate marker and the height field.
+   */
   setHeight(height) {
+    const previous = this.height;
     super.setHeight(height);
-    // At altitude every vertex moves to the new height.
-    this.positions = this.positions.map((p) => withHeight(p, this.height));
+    if (this.constructor.singleHeight) {
+      this.positions = this.positions.map((p) => withHeight(p, this.height));
+      return;
+    }
+    const delta = this.height - previous;
+    this.positions = this.positions.map((p) => withHeight(p, Math.max(heightOf(p) + delta, 0)));
   }
 
   isValid() {
@@ -111,7 +122,9 @@ export default class VertexShape extends Shape {
   }
 
   onDrawClick(position) {
-    this.positions.push(position);
+    // Clamped shapes are picked on the ground; store the vertex at the base height anyway,
+    // so unclamping the shape later raises it there.
+    this.positions.push(this.clampToGround ? withHeight(position, this.height) : position);
     this._floating = undefined;
     this.invalidate(Dirty.GEOMETRY);
     return "continue";
@@ -174,7 +187,9 @@ export default class VertexShape extends Shape {
 
   onMarkerDrag(spec, position) {
     if (spec.role === "vertex") {
-      this.positions[spec.index] = position;
+      // A drag moves the vertex sideways only; it keeps its own height (a clamped shape is
+      // dragged on the ground, which would otherwise set it to 0).
+      this.positions[spec.index] = withHeight(position, heightOf(this.positions[spec.index]));
       this.invalidate(Dirty.GEOMETRY);
     }
   }
