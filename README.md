@@ -107,6 +107,10 @@ editor.selected?.toJSON();                                 // Shape.fromJSON(jso
 - **Markers:** white squares by default; the image can be changed. Vertex markers can be
   deletable (a red X shows on hover or click) or numbered pins (PinBuilder). A translate
   marker moves the whole shape. At altitude, shift+drag changes height.
+- **Cursor messages:** while drawing, a small box at the mouse cursor says what to do next,
+  such as "Click to set center" or "Click to add vertex". Each shape's `cursorMessages`
+  option turns it off (`false`) or supplies your own text (a function). Use the editor's
+  `cursorMessage` option to style it, offset it or turn it off everywhere.
 - **Performance:** a changed shape is rebuilt at most once per frame, and coarser while it is
   being drawn or dragged. A whole shape is one fill primitive plus its outline primitives.
   Only the shape being edited has billboards. Per-frame material updates skip shapes outside

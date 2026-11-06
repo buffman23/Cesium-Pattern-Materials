@@ -112,6 +112,17 @@ export default class Sector extends Shape {
     ][this._drawStep] ?? "";
   }
 
+  cursorMessage() {
+    if (this._mode !== ShapeMode.DRAW) {
+      return undefined;
+    }
+    return [
+      "Click to set center",
+      "Click to set radius and arc start",
+      "Click to set arc end",
+    ][this._drawStep];
+  }
+
   #arc() {
     const segments = Math.max(
       4,

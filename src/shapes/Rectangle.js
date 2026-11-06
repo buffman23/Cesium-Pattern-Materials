@@ -117,6 +117,13 @@ export default class Rectangle extends Shape {
       : "Drawing Rectangle: click the first corner.";
   }
 
+  cursorMessage() {
+    if (this._mode !== ShapeMode.DRAW) {
+      return undefined;
+    }
+    return this.cornerA ? "Click to set opposite corner" : "Click to set first corner";
+  }
+
   createFillGeometry() {
     return this.isValid() ? this.polygonGeometry(this.corners()) : undefined;
   }

@@ -84,6 +84,13 @@ export default class Circle extends Shape {
       : "Drawing Circle: click to place the center.";
   }
 
+  cursorMessage() {
+    if (this._mode !== ShapeMode.DRAW) {
+      return undefined;
+    }
+    return this.center ? "Click to set radius" : "Click to set center";
+  }
+
   /** Boundary points, at the shape's point height. */
   boundary() {
     if (!this.isValid()) {

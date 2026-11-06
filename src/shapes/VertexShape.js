@@ -109,6 +109,15 @@ export default class VertexShape extends Shape {
       : `Drawing ${name}: ${n} vertices. Click to add more; double-click or right-click to finish.`;
   }
 
+  cursorMessage() {
+    if (this._mode !== ShapeMode.DRAW) {
+      return undefined;
+    }
+    return this.positions.length < this.constructor.minVertices
+      ? "Click to add vertex"
+      : "Click to add vertex\nDouble-click or right-click to finish";
+  }
+
   markerSpecs() {
     const o = this.markerOptions;
     const canDelete =

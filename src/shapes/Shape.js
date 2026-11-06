@@ -68,7 +68,7 @@ let nextId = 1;
  *  - static type (registered with Shape.register), static hasFill, static defaultMarkerOptions
  *  - getControlPoints() / setControlPoints(points): the points `translate` moves
  *  - onDrawClick(position) -> "continue" | "done", onDrawMove(position),
- *    onDrawFinishRequest("double" | "right"), drawHint()
+ *    onDrawFinishRequest("double" | "right"), drawHint(), cursorMessage()
  *  - isValid()
  *  - markerSpecs() -> [{ key, position, role, deletable?, label?, ... }]
  *  - onMarkerDrag(spec, position), onMarkerHeight(spec, height), deleteMarker(spec)
@@ -122,6 +122,7 @@ export default class Shape {
       },
       markers,
       properties: json.properties,
+      cursorMessages: json.cursorMessages,
       ...ShapeClass.stateFromJSON(json),
     });
   }
@@ -145,6 +146,9 @@ export default class Shape {
    * @param {object} [options.detail] Geometry detail overrides, see DEFAULT_DETAIL (geodesy.js).
    * @param {boolean} [options.show=true]
    * @param {object} [options.properties] Free user data, kept in toJSON.
+   * @param {boolean|function} [options.cursorMessages=true] Message box at the mouse cursor
+   *   (shown by the editor): true = the shape's own messages ("Click to set center" …, while
+   *   drawing), false = none, or a function (shape) => text | undefined for your own.
    */
   constructor(options = {}) {
     this.id = options.id ?? `shape-${nextId++}`;
@@ -172,6 +176,7 @@ export default class Shape {
     };
     this.detail = { ...DEFAULT_DETAIL, ...options.detail };
     this.properties = options.properties ?? {};
+    this.cursorMessages = options.cursorMessages ?? true;
 
     /** Raised (with the shape) after the shape was rebuilt; at most once per frame. */
     this.changed = new Event();
@@ -325,6 +330,24 @@ export default class Shape {
     this.invalidate(Dirty.FILL);
   }
 
+  /** true (built-in messages), false (none) or a function (shape) => text | undefined. */
+  setCursorMessages(value) {
+    this.cursorMessages = value;
+    this.editor?._updateCursorMessage();
+  }
+
+  /**
+   * The text for the message box at the mouse cursor right now, or undefined for none: what
+   * the `cursorMessages` option gives (the editor shows it).
+   */
+  currentCursorMessage() {
+    const option = this.cursorMessages;
+    if (!option) {
+      return undefined;
+    }
+    return typeof option === "function" ? option(this) : this.cursorMessage();
+  }
+
   setMarkerOptions(options) {
     Object.assign(this.markerOptions, options);
     this._markers?.restyleAll();
@@ -385,6 +408,14 @@ export default class Shape {
 
   drawHint() {
     return "";
+  }
+
+  /**
+   * Short instruction for the message box at the mouse cursor (e.g. "Click to set center"),
+   * or undefined for none. Subclasses return one per DRAW_MODE step; may contain "\n".
+   */
+  cursorMessage() {
+    return undefined;
   }
 
   markerSpecs() {
@@ -744,6 +775,8 @@ export default class Shape {
         pinColor: o.pinColor.toCssColorString(),
       },
       properties: this.properties,
+      // Only true / false can be saved, not a function.
+      ...(typeof this.cursorMessages === "boolean" ? { cursorMessages: this.cursorMessages } : {}),
       ...this.stateToJSON(),
     };
   }

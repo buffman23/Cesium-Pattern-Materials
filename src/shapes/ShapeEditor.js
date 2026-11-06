@@ -33,16 +33,33 @@ const DUPLICATE_CLICK_PIXELS = 4;
  * height (at altitude), click a marker's red X to delete it, click a shape to edit it, click
  * empty globe or press Esc to stop editing.
  *
+ * While drawing, a message box at the mouse cursor tells the user what to do next ("Click to
+ * set center" …): each shape's `cursorMessages` option decides the text (see
+ * Shape#currentCursorMessage). It's an HTML element over the canvas, not part of the scene.
+ *
  * Works with requestRenderMode: everything that changes requests a frame.
  */
 export default class ShapeEditor {
   /** Creates an editor once ground primitives can be built synchronously. */
-  static async create(viewer) {
+  static async create(viewer, options) {
     await GroundPrimitive.initializeTerrainHeights();
-    return new ShapeEditor(viewer);
+    return new ShapeEditor(viewer, options);
   }
 
-  constructor(viewer) {
+  /**
+   * @param {Viewer} viewer
+   * @param {object} [options]
+   * @param {object} [options.cursorMessage] The message box at the mouse cursor:
+   *   - show (default true): false turns it off for every shape.
+   *   - offset (Cartesian2 or { x, y }, default 16, 16): pixels from the cursor to the box.
+   *   - className: CSS class for the box; replaces the built-in look (dark box, white text).
+   */
+  constructor(viewer, { cursorMessage = {} } = {}) {
+    this.cursorMessageOptions = {
+      show: cursorMessage.show ?? true,
+      offset: cursorMessage.offset ?? { x: 16, y: 16 },
+      className: cursorMessage.className,
+    };
     this.viewer = viewer;
     this.scene = viewer.scene;
     this.shapes = [];
@@ -65,6 +82,9 @@ export default class ShapeEditor {
     this._hoverFrame = undefined;
     this._shift = false;
     this._grownEllipsoids = new Map();
+    this._cursorElement = undefined; // created on first use
+    this._cursorPosition = undefined; // last mouse position on the canvas (CSS pixels)
+    this._cursorInside = false;
 
     this.#bindInput(viewer);
     this._removePreRender = this.scene.preRender.addEventListener(() => this.#onPreRender());
@@ -104,6 +124,7 @@ export default class ShapeEditor {
     this.shapes = this.shapes.filter((s) => s !== shape);
     shape.editor = undefined;
     this.scene.requestRender();
+    this._updateCursorMessage();
     this.shapeRemoved.raiseEvent(shape);
   }
 
@@ -126,6 +147,7 @@ export default class ShapeEditor {
     this._lastClick = undefined;
     shape._setMode(ShapeMode.DRAW);
     this.#emitHint(shape.drawHint());
+    this._updateCursorMessage();
     return shape;
   }
 
@@ -142,6 +164,7 @@ export default class ShapeEditor {
       "Drag the markers to edit (shift+drag changes height at altitude). " +
         "Click elsewhere or press Esc to stop editing.",
     );
+    this._updateCursorMessage();
     this.selectionChanged.raiseEvent(shape, previous);
   }
 
@@ -154,6 +177,7 @@ export default class ShapeEditor {
     previous._setMode(ShapeMode.IDLE);
     this.#setCursor("");
     this.#emitHint("Click a shape to edit it, or pick a tool to draw another.");
+    this._updateCursorMessage();
     this.selectionChanged.raiseEvent(undefined, previous);
   }
 
@@ -163,6 +187,10 @@ export default class ShapeEditor {
     window.removeEventListener("keydown", this._onKeyDown);
     window.removeEventListener("keyup", this._onKeyUp);
     window.removeEventListener("blur", this._onBlur);
+    this.scene.canvas.removeEventListener("mouseleave", this._onMouseLeave);
+    this.scene.canvas.removeEventListener("mouseenter", this._onMouseEnter);
+    this._cursorElement?.remove();
+    this._cursorElement = undefined;
     this._removePreRender();
     this._removePostRender();
     if (this._hoverFrame) {
@@ -187,6 +215,72 @@ export default class ShapeEditor {
     }
     shape._setMode(ShapeMode.IDLE);
     this.select(shape);
+    this._updateCursorMessage();
+  }
+
+  // --- Cursor message --------------------------------------------------------------------------
+
+  /**
+   * Shows the drawn (or else the selected) shape's current cursor message next to the mouse,
+   * or hides the box. Called on mouse moves and whenever the drawing state changes; shapes
+   * call it when their cursorMessages option changes.
+   */
+  _updateCursorMessage() {
+    const options = this.cursorMessageOptions;
+    const shape = this.drawing ?? this.selected;
+    const text =
+      options.show && this._cursorInside && this._cursorPosition && !this._dragging
+        ? shape?.currentCursorMessage()
+        : undefined;
+    if (!text) {
+      if (this._cursorElement) {
+        this._cursorElement.style.display = "none";
+      }
+      return;
+    }
+    const element = this.#cursorElement();
+    if (element.textContent !== text) {
+      element.textContent = text;
+    }
+    element.style.display = "block";
+
+    // Fixed positioning in viewport pixels: the canvas rectangle plus the cursor position,
+    // flipped to the other side of the cursor where it would leave the canvas.
+    const canvas = this.scene.canvas.getBoundingClientRect();
+    const { x: cx, y: cy } = this._cursorPosition;
+    const { x: ox, y: oy } = options.offset;
+    const width = element.offsetWidth;
+    const height = element.offsetHeight;
+    let x = canvas.left + cx + ox;
+    let y = canvas.top + cy + oy;
+    if (x + width > canvas.right) {
+      x = canvas.left + cx - ox - width;
+    }
+    if (y + height > canvas.bottom) {
+      y = canvas.top + cy - oy - height;
+    }
+    element.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
+  }
+
+  #cursorElement() {
+    if (!this._cursorElement) {
+      const element = document.createElement("div");
+      // Layout styles always; the look only without a custom class.
+      element.style.cssText =
+        "position:fixed;left:0;top:0;z-index:1000;pointer-events:none;white-space:pre-line;";
+      const className = this.cursorMessageOptions.className;
+      if (className) {
+        element.className = className;
+      } else {
+        element.style.cssText +=
+          "padding:4px 8px;border-radius:4px;border:1px solid rgba(255,255,255,0.25);" +
+          "background:rgba(20,20,20,0.82);color:#fff;font:12px/1.4 system-ui,sans-serif;" +
+          "max-width:260px;box-shadow:0 1px 4px rgba(0,0,0,0.4);";
+      }
+      this.viewer.container.appendChild(element);
+      this._cursorElement = element;
+    }
+    return this._cursorElement;
   }
 
   // --- Picking positions -------------------------------------------------------------------
@@ -270,6 +364,16 @@ export default class ShapeEditor {
     window.addEventListener("keydown", this._onKeyDown);
     window.addEventListener("keyup", this._onKeyUp);
     window.addEventListener("blur", this._onBlur);
+    // The cursor message box only shows while the pointer is over the globe.
+    this._onMouseLeave = () => {
+      this._cursorInside = false;
+      this._updateCursorMessage();
+    };
+    this._onMouseEnter = () => {
+      this._cursorInside = true;
+    };
+    this.scene.canvas.addEventListener("mouseleave", this._onMouseLeave);
+    this.scene.canvas.addEventListener("mouseenter", this._onMouseEnter);
   }
 
   #emitHint(text) {
@@ -305,6 +409,7 @@ export default class ShapeEditor {
       } else if (this.drawing === shape) {
         this.#emitHint(shape.drawHint());
       }
+      this._updateCursorMessage(); // the next step's message (or none once finished)
       return;
     }
     if (this._clickConsumed) {
@@ -356,6 +461,7 @@ export default class ShapeEditor {
     shape._setInteractive(true);
     shape.markers.setSelected(id.key);
     shape.markers.setActive(id.key);
+    this._updateCursorMessage(); // hidden while dragging
   }
 
   #endDrag() {
@@ -367,6 +473,7 @@ export default class ShapeEditor {
     this.scene.screenSpaceCameraController.enableInputs = true;
     drag.shape.markers?.setActive(undefined);
     drag.shape._setInteractive(false);
+    this._updateCursorMessage();
     // A drag that moved must not also count as a click on whatever is under the cursor.
     this._clickConsumed = drag.moved;
     setTimeout(() => {
@@ -375,6 +482,9 @@ export default class ShapeEditor {
   }
 
   #onMouseMove(e) {
+    this._cursorPosition = Cartesian2.clone(e.endPosition, this._cursorPosition);
+    this._cursorInside = true;
+    this._updateCursorMessage();
     const drag = this._dragging;
     if (drag) {
       this.#drag(drag, e);

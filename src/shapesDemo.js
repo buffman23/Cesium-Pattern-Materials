@@ -138,6 +138,7 @@ const controls = {
   numbered: $("numbered"),
   translatable: $("translatable"),
   groundLine: $("groundLine"),
+  cursorMessages: $("cursorMessages"),
 };
 
 const arcType = () => (controls.arcType.value === "RHUMB" ? ArcType.RHUMB : ArcType.GEODESIC);
@@ -163,6 +164,7 @@ function shapeOptions() {
     // "deletable" only affects shapes with vertex markers (Polyline, Polygon, Corridor).
     markers: markerOptions(),
     width: Number(controls.corridorWidth.value) || 1000,
+    cursorMessages: controls.cursorMessages.checked,
   };
 }
 
@@ -198,6 +200,7 @@ editor.selectionChanged.addEventListener((shape) => {
   controls.numbered.checked = shape.markerOptions.numbered;
   controls.translatable.checked = shape.markerOptions.translatable;
   controls.groundLine.checked = shape.markerOptions.groundLine;
+  controls.cursorMessages.checked = shape.cursorMessages !== false;
   if (shape instanceof Corridor) {
     controls.corridorWidth.value = String(Math.round(shape.width));
   }
@@ -272,6 +275,10 @@ controls.clampToGround.addEventListener(
     }
     s.setClampToGround(controls.clampToGround.checked);
   }),
+);
+controls.cursorMessages.addEventListener(
+  "change",
+  onSelected((s) => s.setCursorMessages(controls.cursorMessages.checked)),
 );
 for (const key of ["deletable", "numbered", "translatable", "groundLine"]) {
   controls[key].addEventListener("change", onSelected((s) => s.setMarkerOptions(markerOptions())));
