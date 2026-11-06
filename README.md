@@ -101,6 +101,13 @@ editor.startDrawing(Polygon, {
 editor.selected?.toJSON();                                 // Shape.fromJSON(json) restores it
 ```
 
+- **Corridor:** a chain of cylinders. Each vertex has its own radius and min / max altitude,
+  and each leg joins two cylinders with straight tangent sides, so the width tapers.
+  `altitudeMode: "slope"` slopes the floor and ceiling between cylinders; `"step"` keeps
+  each leg at the lower floor and higher ceiling of its two cylinders. Clamped to the ground
+  it shows only the footprint. Markers per vertex: the vertex, a radius arrow, and (at
+  altitude) top and bottom arrows dragged up or down. It needs the `polygon-clipping`
+  package and must fit within a hemisphere.
 - **Box:** a rotatable box with two forms on one geometry. The anchor form takes `anchor1`,
   `anchor2` (the middles of the short ends) and `width`. The center form takes `center`,
   `length`, `width` and `heading`. Each form has its own drawing steps, markers and fields,

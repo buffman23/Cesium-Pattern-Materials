@@ -391,24 +391,31 @@ export default class ShapeEditor {
   #pickedId(windowPosition) {
     const ours = (id) => id?.shape instanceof Shape && id.shape.editor === this;
     const id = this.scene.pick(windowPosition)?.id;
-    if (!ours(id) || id.kind !== "marker") {
+    const handle = (other) => other.kind === "marker" || other.kind === "delete";
+    if (!ours(id) || !handle(id)) {
       return ours(id) ? id : undefined;
     }
-    // Markers can overlap (e.g. a narrow box's width handles and its translate marker): take
-    // the one whose center is nearest the cursor, so each stays grabbable by its middle. Only
-    // markers are drilled, so ordinary picks cost no more than before.
-    const markers = this.scene
+    // Markers (and a delete X) can overlap, e.g. a narrow box's width handles and its
+    // translate marker: take the one whose center is nearest the cursor, so each stays
+    // grabbable by its middle. Only drilled when a handle was hit, so other picks cost the same.
+    const handles = this.scene
       .drillPick(windowPosition, 6)
       .map((picked) => picked.id)
-      .filter((other) => ours(other) && other.kind === "marker" && other.shape === id.shape);
-    if (markers.length < 2) {
+      .filter((other) => ours(other) && handle(other) && other.shape === id.shape);
+    if (handles.length < 2) {
       return id;
     }
     let best = id;
     let bestDistance = Infinity;
-    for (const candidate of markers) {
-      const spec = candidate.shape.markers?.spec(candidate.key);
+    for (const candidate of handles) {
+      const markers = candidate.shape.markers;
+      const spec = markers?.spec(candidate.key);
       const center = spec && this.scene.cartesianToCanvasCoordinates(spec.position);
+      // Where it's drawn: the marker's own offset, or the delete X's offset from its marker.
+      const offset = candidate.kind === "delete" ? markers.deleteBillboard?.pixelOffset : spec?.pixelOffset;
+      if (center && offset) {
+        Cartesian2.add(center, offset, center);
+      }
       const d = center ? Cartesian2.distance(center, windowPosition) : Infinity;
       if (d < bestDistance) {
         bestDistance = d;
@@ -539,8 +546,9 @@ export default class ShapeEditor {
       return;
     }
     drag.moved = true;
-    if (this._shift && !shape.clampToGround) {
-      // Vertical drag: pixels up -> meters up, at the marker's distance from the camera.
+    if ((this._shift || spec.vertical) && !shape.clampToGround) {
+      // Vertical drag (shift, or markers that only move up / down): pixels up -> meters up,
+      // at the marker's distance from the camera.
       const pixels = e.startPosition.y - e.endPosition.y;
       const scene = this.scene;
       const metersPerPixel =

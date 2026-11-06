@@ -133,7 +133,10 @@ const controls = {
   outlineMaterial: $("outlineMaterial"),
   fillMaterial: $("fillMaterial"),
   height: $("height"),
-  corridorWidth: $("corridorWidth"),
+  corridorAltitudeMode: $("corridorAltitudeMode"),
+  corridorRadius: $("corridorRadius"),
+  corridorMinAltitude: $("corridorMinAltitude"),
+  corridorMaxAltitude: $("corridorMaxAltitude"),
   clampToGround: $("clampToGround"),
   deletable: $("deletable"),
   numbered: $("numbered"),
@@ -165,7 +168,11 @@ function shapeOptions() {
     fill: { material: fill, show: Boolean(fill) },
     // "deletable" only affects shapes with vertex markers (Polyline, Polygon, Corridor).
     markers: markerOptions(),
-    width: Number(controls.corridorWidth.value) || 1000,
+    // Corridor only: the first vertex's cylinder (later vertices copy the previous one).
+    radius: Number(controls.corridorRadius.value) || 1000,
+    minAltitude: Number(controls.corridorMinAltitude.value) || 0,
+    maxAltitude: Number(controls.corridorMaxAltitude.value) || 0,
+    altitudeMode: controls.corridorAltitudeMode.value,
     cursorMessages: controls.cursorMessages.checked,
     form: controls.boxForm.value, // Box only
   };
@@ -208,7 +215,7 @@ editor.selectionChanged.addEventListener((shape) => {
     controls.boxForm.value = shape.form;
   }
   if (shape instanceof Corridor) {
-    controls.corridorWidth.value = String(Math.round(shape.width));
+    controls.corridorAltitudeMode.value = shape.altitudeMode;
   }
 });
 
@@ -269,9 +276,9 @@ controls.height.addEventListener(
   "change",
   onSelected((s) => s.setHeight(Number(controls.height.value) || 0)),
 );
-controls.corridorWidth.addEventListener(
+controls.corridorAltitudeMode.addEventListener(
   "change",
-  onSelected((s) => s instanceof Corridor && s.setWidth(Number(controls.corridorWidth.value) || 1000)),
+  onSelected((s) => s instanceof Corridor && s.setAltitudeMode(controls.corridorAltitudeMode.value)),
 );
 controls.clampToGround.addEventListener(
   "change",
@@ -377,6 +384,64 @@ function fieldRow(field) {
       if (force || !focusedIn(triple)) {
         set(value);
       }
+    };
+  } else if (field.type === "table") {
+    // One row per entry (e.g. corridor vertices), one input per column, a remove button.
+    const columns = field.columns;
+    const grid = `16px repeat(${columns.length}, minmax(0, 1fr)) 22px`;
+    const header = document.createElement("div");
+    header.className = "vertex columns";
+    header.style.gridTemplateColumns = grid;
+    header.append(Object.assign(document.createElement("span"), { textContent: "#" }));
+    for (const column of columns) {
+      header.append(Object.assign(document.createElement("span"), { textContent: column.label ?? column.name }));
+    }
+    header.append(document.createElement("span"));
+    const list = document.createElement("div");
+    element.append(label, header, list);
+    const decimals = (column) => (column.type === "longitude" || column.type === "latitude" ? 6 : 1);
+    let rowInputs = [];
+    row.update = (value, { force } = {}) => {
+      const rows = value ?? [];
+      label.textContent = `${field.label} (${rows.length})`;
+      if (rowInputs.length !== rows.length) {
+        list.replaceChildren();
+        rowInputs = rows.map((_, index) => {
+          const line = document.createElement("div");
+          line.className = "vertex";
+          line.style.gridTemplateColumns = grid;
+          line.append(Object.assign(document.createElement("span"), { textContent: index + 1 }));
+          const inputs = columns.map((column) => {
+            const input = numberInput(() => {
+              const next = formShape.getField(field.name);
+              next[index] = { ...next[index], [column.name]: input.value };
+              apply(row, next);
+            });
+            line.append(input);
+            return input;
+          });
+          const remove = document.createElement("button");
+          remove.textContent = "✕";
+          remove.title = "Remove";
+          remove.disabled = rows.length <= (field.min ?? 0);
+          remove.addEventListener("click", () => {
+            const next = formShape.getField(field.name);
+            next.splice(index, 1);
+            apply(row, next);
+          });
+          line.append(remove);
+          list.append(line);
+          return { line, inputs };
+        });
+      }
+      rows.forEach((entry, index) => {
+        const { line, inputs } = rowInputs[index];
+        if (force || !focusedIn(line)) {
+          columns.forEach((column, c) => {
+            inputs[c].value = showNumber(entry[column.name], decimals(column));
+          });
+        }
+      });
     };
   } else if (field.type === "positions") {
     const list = document.createElement("div");

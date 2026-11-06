@@ -47,12 +47,19 @@ export function isWidePolygon(boundary, arcType) {
  * @param {ArcType} options.arcType
  * @param {number} [options.height] One height for the whole polygon; omitted = interpolate
  *   the vertices' own heights.
+ * @param {Cartesian3[][]} [options.holes] Hole rings.
+ * @param {function} [options.heightAt] (surfacePosition) => height, for every vertex of the
+ *   subdivided polygon; overrides `height` and the interpolation.
  * @returns {Geometry|undefined}
  */
-export function createPolygonGeometry(boundary, { granularity, arcType, height }) {
+export function createPolygonGeometry(boundary, { granularity, arcType, height, holes = [], heightAt: customHeightAt }) {
+  const surface = (ring) => ring.map((p) => withHeight(p, 0));
   const geometry = PolygonGeometry.createGeometry(
     new PolygonGeometry({
-      polygonHierarchy: new PolygonHierarchy(boundary.map((p) => withHeight(p, 0))),
+      polygonHierarchy: new PolygonHierarchy(
+        surface(boundary),
+        holes.map((hole) => new PolygonHierarchy(surface(hole))),
+      ),
       height: 0,
       granularity,
       arcType,
@@ -64,7 +71,8 @@ export function createPolygonGeometry(boundary, { granularity, arcType, height }
   }
   removeDuplicateTriangles(geometry);
   const values = geometry.attributes.position.values;
-  const heightAt = height === undefined ? heightInterpolator(boundary) : () => height;
+  const heightAt =
+    customHeightAt ?? (height === undefined ? heightInterpolator(boundary) : () => height);
   const normals = new Float32Array(values.length);
   const st = textureCoordinates(values, boundary);
 

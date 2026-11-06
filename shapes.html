@@ -66,8 +66,26 @@
           <input id="height" type="number" min="0" step="100" value="5000" />
         </div>
         <div>
-          <label for="corridorWidth">Corridor width (m)</label>
-          <input id="corridorWidth" type="number" min="1" step="100" value="2000" />
+          <label for="corridorAltitudeMode">Corridor between vertices</label>
+          <select id="corridorAltitudeMode">
+            <option value="slope" selected>Slope</option>
+            <option value="step">Step</option>
+          </select>
+        </div>
+      </div>
+      <!-- New corridor vertices start with these; each vertex can then be changed on its own. -->
+      <div class="row">
+        <div>
+          <label for="corridorRadius">Corridor radius (m)</label>
+          <input id="corridorRadius" type="number" min="1" step="100" value="10000" />
+        </div>
+        <div>
+          <label for="corridorMinAltitude">Min alt (m)</label>
+          <input id="corridorMinAltitude" type="number" min="0" step="100" value="0" />
+        </div>
+        <div>
+          <label for="corridorMaxAltitude">Max alt (m)</label>
+          <input id="corridorMaxAltitude" type="number" min="0" step="100" value="8000" />
         </div>
       </div>
       <div class="row">

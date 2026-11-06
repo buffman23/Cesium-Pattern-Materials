@@ -77,8 +77,8 @@ let nextId = 1;
  *  - isValid()
  *  - markerSpecs() -> [{ key, position, role, deletable?, label?, ... }]
  *  - onMarkerDrag(spec, position), onMarkerHeight(spec, height), deleteMarker(spec)
- *  - createFillGeometry() -> geometry description | undefined
- *  - outlineLines() -> [{ positions, loop?, key?, width? }]
+ *  - createFillGeometry() -> geometry (description or created) | array of them | undefined
+ *  - outlineLines() -> [{ positions, loop?, key?, width?, arcType? }]
  *  - stateToJSON() and static stateFromJSON(json) -> constructor options
  *  - static fields: the fields a form can show and edit (see below)
  *
@@ -87,7 +87,8 @@ let nextId = 1;
  * (`min` / `max` may be functions of the shape; `show` hides a field for some instances, e.g.
  * per Box form)
  * with types "position" ([lon°, lat°, height m]), "positions" (an array of those), "distance"
- * (meters), "angle" (degrees), "number", "boolean" and "enum" (one of `options`). Read and
+ * (meters), "angle" (degrees), "number", "boolean", "enum" (one of `options`) and "table"
+ * (rows of `columns`, e.g. a corridor's vertices with their radii and altitudes). Read and
  * write them with getField / setField / getFields, which convert units, validate and
  * rebuild. `changed` (and the editor's `shapeChanged`) is raised with
  * (shape, { fields, source, interactive }): the names of the fields that changed this frame,
@@ -579,23 +580,29 @@ export default class Shape {
   /**
    * Fill geometry for a closed boundary. Edges follow the arc type and the surface follows
    * the earth's curvature, on the ground and at altitude (heights taken from the boundary).
+   *
+   * @param {Cartesian3[]} boundary
+   * @param {object} [options]
+   * @param {Cartesian3[][]} [options.holes]
+   * @param {ArcType} [options.arcType=this.arcType] E.g. GEODESIC for rings already densified.
    */
-  polygonGeometry(boundary) {
+  polygonGeometry(boundary, { holes = [], arcType = this.arcType } = {}) {
     if (distinctCount(boundary) < 3) {
       return undefined;
     }
     // Copies: Cesium's polygon (and corridor) geometry projects the positions it's given onto
     // the ellipsoid in place, which would flatten the shape's own vertices.
     boundary = clonePositions(boundary);
+    holes = holes.map(clonePositions);
     this._fillPositions = boundary;
     const options = {
       vertexFormat: TEXTURED.vertexFormat,
       granularity: polygonGranularity(boundary, this.detail, this.detailFactor),
-      arcType: this.arcType,
+      arcType,
     };
     // A wide polygon: bounding rectangle 180° or more across, e.g. around a pole.
-    const wide = isWidePolygon(boundary, this.arcType);
-    if (wide && this.arcType === ArcType.RHUMB) {
+    const wide = isWidePolygon(boundary, arcType);
+    if (wide && arcType === ArcType.RHUMB) {
       // Cesium 1.122 never returns from building a wide RHUMB polygon (ground or not).
       // Trace the rhumb edges with short geodesic pieces instead.
       boundary = densify(boundary, ArcType.RHUMB, options.granularity * ellipsoid.maximumRadius, true);
@@ -612,12 +619,16 @@ export default class Shape {
         granularity: options.granularity,
         arcType: options.arcType,
         height: uniform ? heights[0] : undefined,
+        holes,
       });
     }
     // On the ground (GroundPrimitive) Cesium's own geometry is fine.
     return new PolygonGeometry({
       ...options,
-      polygonHierarchy: new PolygonHierarchy(clonePositions(boundary)),
+      polygonHierarchy: new PolygonHierarchy(
+        clonePositions(boundary),
+        holes.map((hole) => new PolygonHierarchy(clonePositions(hole))),
+      ),
     });
   }
 
@@ -744,8 +755,9 @@ export default class Shape {
     const used = new Set();
     const spec = this.fill.material;
     if (this.constructor.hasFill && this.fill.show && spec) {
-      const geometry = this.createFillGeometry();
-      if (geometry) {
+      // One geometry, or several (e.g. a corridor volume's surfaces and walls).
+      const geometries = [this.createFillGeometry()].flat().filter(Boolean);
+      if (geometries.length > 0) {
         used.add("fill");
         const instance = this.#instance("fill", this.clampToGround ? spec : altitudeFallback(spec));
         instance.setFill?.(this._fillPositions.length > 0 ? this._fillPositions : this.getControlPoints());
@@ -755,10 +767,9 @@ export default class Shape {
           translucent: true,
           flat: true,
         });
-        const geometryInstances = new GeometryInstance({
-          geometry,
-          id: { shape: this, part: "fill" },
-        });
+        const geometryInstances = geometries.map(
+          (geometry) => new GeometryInstance({ geometry, id: { shape: this, part: "fill" } }),
+        );
         const Type = this.clampToGround ? GroundPrimitive : Primitive;
         const primitive = new Type({ geometryInstances, appearance, asynchronous: false });
         primitive.show = this._show;
@@ -801,7 +812,7 @@ export default class Shape {
             const width = line.width ?? this.outline.width;
             const positions = this.#prepareStatefulLine(line, spec);
             const extras = instance.setLine?.(positions, width) ?? [];
-            const arcType = spec.requiresGeodesicSegments ? ArcType.GEODESIC : this.arcType;
+            const arcType = spec.requiresGeodesicSegments ? ArcType.GEODESIC : line.arcType ?? this.arcType;
             this.#addLinePrimitive(instance.material, [
               { positions, width, loop: false, arcType },
               ...extras.map((e) => ({ positions: e.positions, width: e.width, loop: false, arcType })),
@@ -817,7 +828,7 @@ export default class Shape {
               positions: line.positions,
               width: line.width ?? this.outline.width,
               loop: Boolean(line.loop),
-              arcType: this.arcType,
+              arcType: line.arcType ?? this.arcType,
             })),
           );
         }
@@ -958,6 +969,35 @@ export function validateField(field, value) {
         throw new Error(`${label} allows at most ${field.max} entries.`);
       }
       return value.map((v, i) => position(v, `${label} ${i + 1}`));
+    }
+    case "table": {
+      // Rows are objects keyed by column name; columns: { name, label, type, min?, max? }
+      // with types "longitude", "latitude", "distance", "number".
+      if (!Array.isArray(value)) {
+        throw new Error(`${label} must be a list of rows.`);
+      }
+      if (field.min !== undefined && value.length < field.min) {
+        throw new Error(`${label} needs at least ${field.min} rows.`);
+      }
+      if (field.max !== undefined && value.length > field.max) {
+        throw new Error(`${label} allows at most ${field.max} rows.`);
+      }
+      const rows = value.map((row, i) => {
+        const out = {};
+        for (const column of field.columns) {
+          const what = `${label} ${i + 1} ${column.label ?? column.name}`;
+          let v = number(row?.[column.name], what);
+          if (column.type === "latitude" && (v < -90 || v > 90)) {
+            throw new Error(`${what} must be between -90 and 90.`);
+          }
+          if (column.type === "longitude") {
+            v = CesiumMath.toDegrees(CesiumMath.negativePiToPi(CesiumMath.toRadians(v)));
+          }
+          out[column.name] = Math.min(Math.max(v, column.min ?? -Infinity), column.max ?? Infinity);
+        }
+        return out;
+      });
+      return field.validate ? field.validate(rows) : rows;
     }
     default:
       return value;

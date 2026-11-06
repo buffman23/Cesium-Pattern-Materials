@@ -175,6 +175,8 @@ export const DEFAULT_ROLE_STYLES = Object.freeze({
   radius: Object.freeze({ image: RESIZE_SVG, width: 22, height: 22, align: true }),
   end: Object.freeze({ image: ROTATE_SVG, width: 22, height: 22 }),
   start: Object.freeze({ image: ROTATE_SVG, width: 22, height: 22 }),
+  // Vertical handles (e.g. a corridor cylinder's min / max altitude): the resize arrow, upright.
+  altitude: Object.freeze({ image: RESIZE_SVG, width: 22, height: 22, align: true }),
 });
 
 /** Role styles merged per role: each override's properties replace the defaults' ones. */
@@ -228,6 +230,8 @@ export function numberedPinImage(text, color, size) {
  * A marker spec, from Shape.markerSpecs():
  *   { key, position, role, deletable?, label?, index?, ...subclass data }
  * role: "vertex" | "translate" | anything a subclass handles in onMarkerDrag.
+ * Optional: axis (bearing a resize icon points along), axisUp (point it vertically instead),
+ * pixelOffset (Cartesian2), vertical (drags change height, see ShapeEditor).
  *
  * Billboard ids are { shape, key, kind: "marker" | "delete" } so the editor can route picks.
  */
@@ -405,10 +409,15 @@ export class MarkerSet {
     }
     billboard.verticalOrigin = verticalOrigin;
     // Resize icons point along their resize direction whatever the camera heading.
-    billboard.alignedAxis =
-      roleStyle?.align && spec.axis !== undefined
-        ? bearingAxis(spec.position, spec.axis)
-        : Cartesian3.ZERO;
+    // spec.axisUp: along the local vertical instead (for up / down handles).
+    billboard.alignedAxis = !roleStyle?.align
+      ? Cartesian3.ZERO
+      : spec.axisUp
+        ? Ellipsoid.WGS84.geodeticSurfaceNormal(spec.position, new Cartesian3())
+        : spec.axis !== undefined
+          ? bearingAxis(spec.position, spec.axis)
+          : Cartesian3.ZERO;
+    billboard.pixelOffset = spec.pixelOffset ?? Cartesian2.ZERO;
     const active = spec.key === this.activeKey;
     const hover = spec.key === this.hoverKey;
     billboard.width = width * o.scale;
