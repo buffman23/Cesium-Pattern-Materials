@@ -34,12 +34,11 @@ export const BoxForm = Object.freeze({ ANCHORS: "anchors", CENTER: "center" });
 export default class Box extends Shape {
   static type = "Box";
 
-  // Square markers: yellow ones change the width; the ends (anchors, or the center form's
-  // rotate-and-lengthen ends) are white.
+  // Yellow squares change the width. The center form's ends (rotate and lengthen) use the
+  // default rotate icon (role "end"); the anchor form's anchors stay white squares.
   static defaultMarkerOptions = {
     roleStyles: {
       width: { image: coloredMarkerImage(WIDTH_COLOR), width: 12, height: 12, align: false },
-      end: null,
     },
   };
 

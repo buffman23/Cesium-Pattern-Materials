@@ -30,7 +30,7 @@ import { withHeight } from "./geodesy.js";
  *  - groundLine:     at altitude, draws a line from each marker straight down to the ground.
  *  - roleStyles:     looks per marker role, merged per role over DEFAULT_ROLE_STYLES: resize
  *                    handles (width, radius) are cyan double arrows that point along the
- *                    resize direction, rotate handles (end, start) orange circular arrows;
+ *                    resize direction, rotate handles (end, start) white circular arrows;
  *                    other roles use `image`. E.g. { width: { image: url } }; null removes
  *                    one.
  */
@@ -124,7 +124,7 @@ export function coloredMarkerImage(color) {
   return image;
 }
 
-/** Colors of the resize and rotate icons, for shapes that use colored squares instead. */
+/** Cyan of the resize icon, and the orange of the Corridor altitude squares. */
 export const RESIZE_COLOR = "#29b6f6";
 export const ROTATE_COLOR = "#ffa726";
 /** Yellow of size handles drawn as squares (Box width, Corridor radius). */
@@ -149,14 +149,15 @@ const RESIZE_SVG = svgImage(
     "</svg>",
 );
 
-// Rotate handles: an orange circular arrow around a center dot.
+// Rotate handles: a white circular arrow around a center dot, black outline (like the
+// translate arrows).
 const ROTATE_ARC = "M11 4A7 7 0 1 1 4 11";
 const ROTATE_SVG = svgImage(
   '<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 22 22">' +
-    `<path d="${ROTATE_ARC}" fill="none" stroke="#2b1700" stroke-width="5" stroke-linecap="round"/>` +
-    `<path d="${ROTATE_ARC}" fill="none" stroke="#ffa726" stroke-width="2.6" stroke-linecap="round"/>` +
-    '<path d="M0.8 11.5L7.2 11.5L4 6.3Z" fill="#ffa726" stroke="#2b1700" stroke-width="1.2" stroke-linejoin="round"/>' +
-    '<circle cx="11" cy="11" r="2.2" fill="#ffa726" stroke="#2b1700" stroke-width="1.2"/>' +
+    `<path d="${ROTATE_ARC}" fill="none" stroke="#000" stroke-width="5" stroke-linecap="round"/>` +
+    `<path d="${ROTATE_ARC}" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>` +
+    '<path d="M0.8 11.5L7.2 11.5L4 6.3Z" fill="#fff" stroke="#000" stroke-width="1.2" stroke-linejoin="round"/>' +
+    '<circle cx="11" cy="11" r="2.2" fill="#fff" stroke="#000" stroke-width="1.2"/>' +
     "</svg>",
 );
 
@@ -165,7 +166,7 @@ export function defaultResizeImage() {
   return RESIZE_SVG;
 }
 
-/** Orange circular arrow for rotate handles (Box ends, Sector arc ends); an SVG data URI. */
+/** White circular arrow for rotate handles (Box center-form ends); an SVG data URI. */
 export function defaultRotateImage() {
   return ROTATE_SVG;
 }
