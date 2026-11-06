@@ -180,7 +180,8 @@ export default class Shape {
    * @param {object} [options]
    * @param {string} [options.id]
    * @param {ArcType} [options.arcType=ArcType.GEODESIC] GEODESIC or RHUMB.
-   * @param {boolean} [options.clampToGround=true] false = drawn at altitude.
+   * @param {boolean} [options.clampToGround=false] true = draped on the ground; false = drawn
+   *   at altitude (`height`, per-vertex heights, or a corridor's altitudes).
    * @param {number} [options.height=0] Meters above the ellipsoid, at altitude: the height of
    *   single-height shapes and of new vertices.
    * @param {object} [options.outline] { material, width (pixels, default 2), show }.
@@ -199,7 +200,7 @@ export default class Shape {
     this.id = options.id ?? `shape-${nextId++}`;
     this.editor = undefined;
     this.arcType = options.arcType ?? ArcType.GEODESIC;
-    this.clampToGround = options.clampToGround ?? true;
+    this.clampToGround = options.clampToGround ?? false;
     this.height = options.height ?? 0;
     this.outline = {
       material: toShapeMaterial(options.outline?.material) ?? colorMaterial(DEFAULT_OUTLINE_COLOR),
