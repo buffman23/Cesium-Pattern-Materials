@@ -17,7 +17,10 @@ import { withHeight } from "./geodesy.js";
  * Marker options (shape.markerOptions):
  *  - image:          URL, image or canvas for regular markers (default: white square, thin
  *                    black outline). width / height: its size in pixels (default 12 x 12).
- *  - color / activeColor / hoverColor: tints (default white / yellow / light blue).
+ *  - color:          tint of plain markers (default white).
+ *  - hoverColor / activeColor: tint while hovered / dragged, for every kind of marker alike.
+ *                    Off by default (undefined): markers keep their color when hovered or
+ *                    dragged.
  *  - scale:          multiplies every marker's size (default 1).
  *  - deletable:      vertex markers get a red X that deletes the vertex. It appears when the
  *                    marker is hovered or clicked and stays until another marker is hovered.
@@ -28,16 +31,16 @@ import { withHeight } from "./geodesy.js";
  *  - roleStyles:     looks per marker role, merged per role over DEFAULT_ROLE_STYLES: resize
  *                    handles (width, radius) are cyan double arrows that point along the
  *                    resize direction, rotate handles (end, start) orange circular arrows;
- *                    other roles use `image`. Hovered and dragged role icons are tinted
- *                    like squares. E.g. { width: { image: url } }; null removes one.
+ *                    other roles use `image`. E.g. { width: { image: url } }; null removes
+ *                    one.
  */
 export const DEFAULT_MARKER_OPTIONS = Object.freeze({
   image: undefined,
   width: 12,
   height: 12,
   color: Color.WHITE,
-  activeColor: Color.YELLOW,
-  hoverColor: Color.fromCssColorString("#a8d8ff"),
+  activeColor: undefined, // no drag tint
+  hoverColor: undefined, // no hover tint
   scale: 1,
   deletable: false,
   deleteImage: undefined,
@@ -424,10 +427,10 @@ export class MarkerSet {
     const hover = spec.key === this.hoverKey;
     billboard.width = width * o.scale;
     billboard.height = height * o.scale;
-    // Same highlight for every marker: hoverColor on hover, activeColor while dragged.
-    // Colored role icons and pins keep their own colors otherwise (untinted).
+    // Colored role icons and pins keep their own colors (untinted). No hover or drag tint
+    // unless hoverColor / activeColor are set, and then the same for every marker.
     const base = roleStyle || this.#isPin(spec) ? Color.WHITE : o.color;
-    billboard.color = active ? o.activeColor : hover ? o.hoverColor : base;
+    billboard.color = (active && o.activeColor) || (hover && o.hoverColor) || base;
   }
 
   #syncDelete() {
