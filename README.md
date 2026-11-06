@@ -111,8 +111,9 @@ editor.selected?.toJSON();                                 // Shape.fromJSON(jso
   same factor. It needs the `polygon-clipping` package and must fit within a hemisphere.
 - **Box:** a rotatable box with two forms on one geometry. The anchor form takes `anchor1`,
   `anchor2` (the middles of the short ends) and `width`. The center form takes `center`,
-  `length`, `width` and `heading`. Each form has its own drawing steps, markers and fields,
-  and `setForm` switches between them without moving the box.
+  `length`, `width` and `heading`. Each form has its own drawing steps and fields, and
+  `setForm` switches between them without moving the box. Editing is the same in both: drag
+  an end to move it (the other stays put), or shift+drag it to rotate about the center.
 - **Modes:** a shape starts in DRAW_MODE. When it is finished it enters EDIT_MODE, where
   markers can be dragged. Clicking empty globe or pressing Esc makes it IDLE, and clicking it
   edits it again.
@@ -122,8 +123,7 @@ editor.selected?.toJSON();                                 // Shape.fromJSON(jso
   shows what it does:
   - Point handles are white squares.
   - Circle and Corridor resize handles are cyan double arrows that point the way they resize.
-  - Box handles: yellow squares for the width; the center form's ends (rotate and lengthen)
-    are white circular arrows, the anchor form's anchors white squares.
+  - Box handles: yellow squares for the width, white squares for the ends.
   - Sector handles are all white squares.
   - The `roleStyles` marker option changes any of these per role, per shape class
     (`static defaultMarkerOptions`) or per shape.

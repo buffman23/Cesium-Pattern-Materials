@@ -22,20 +22,22 @@ export const BoxForm = Object.freeze({ ANCHORS: "anchors", CENTER: "center" });
  * ends), `width` across it, half to each side. Edges follow the shape's arcType.
  *
  * One stored geometry (center, length, width, heading) with two forms on top, which only
- * change how the box is drawn, edited and described as fields:
+ * change how the box is drawn and described as fields:
  *  - BoxForm.ANCHORS: anchor1, anchor2, width. Drawn by clicking anchor 1, anchor 2, then the
- *    width. Dragging an anchor moves that end; the other end stays put.
+ *    width.
  *  - BoxForm.CENTER: center, length, width, heading (degrees clockwise from north, along the
  *    length). Drawn by clicking the center, a point that sets the length and direction, then
- *    the width. Dragging an end changes the length and rotates the box about the center.
- * Both have width markers on the long sides and a translate marker at the center. Switch with
- * setForm at any time; the box stays where it is. One height for the whole box at altitude.
+ *    the width.
+ * Editing is the same in both: dragging an end marker (white square) moves that end and the
+ * other stays put; with shift it rotates the box about the center instead (both ends move,
+ * and the length follows the cursor). Yellow width markers on the long sides, a translate
+ * marker at the center. Switch forms with setForm at any time; the box stays where it is. One
+ * height for the whole box at altitude.
  */
 export default class Box extends Shape {
   static type = "Box";
 
-  // Yellow squares change the width. The center form's ends (rotate and lengthen) use the
-  // default rotate icon (role "end"); the anchor form's anchors stay white squares.
+  // Yellow squares change the width; the end markers (role "anchor") are white squares.
   static defaultMarkerOptions = {
     roleStyles: {
       width: { image: coloredMarkerImage(WIDTH_COLOR), width: 12, height: 12, align: false },
@@ -378,16 +380,17 @@ export default class Box extends Shape {
       }
       return specs;
     }
+    // The same end markers in both forms: drag one end (the other stays put), or with shift
+    // rotate about the center. shiftVertical: false - shift doesn't make it a height drag.
     const numbered = this.markerOptions.numbered;
-    const specs = anchors
-      ? [
-          { key: "anchor1", position: a1, role: "anchor", index: 0, label: numbered ? 1 : undefined },
-          { key: "anchor2", position: a2, role: "anchor", index: 1, label: numbered ? 2 : undefined },
-        ]
-      : [
-          { key: "end1", position: a1, role: "end", index: 0 },
-          { key: "end2", position: a2, role: "end", index: 1 },
-        ];
+    const specs = [a1, a2].map((position, index) => ({
+      key: `anchor${index + 1}`,
+      position,
+      role: "anchor",
+      index,
+      label: numbered ? index + 1 : undefined,
+      shiftVertical: false,
+    }));
     const half = this.width / 2;
     if (this.length > 0) {
       for (const [key, side] of [["side1", -HALF_PI], ["side2", HALF_PI]]) {
@@ -402,16 +405,18 @@ export default class Box extends Shape {
     return specs;
   }
 
-  onMarkerDrag(spec, position) {
-    if (spec.role === "anchor") {
-      const [a1, a2] = this.anchors();
-      this.setAnchors(spec.index === 0 ? position : a1, spec.index === 0 ? a2 : position);
-    } else if (spec.role === "end") {
-      // The center stays; the dragged end sets the half length and the direction.
+  onMarkerDrag(spec, position, { shift = false } = {}) {
+    if (spec.role === "anchor" && shift) {
+      // Rotate about the center: it stays put; the dragged end sets the direction and the half
+      // length, and the other end moves opposite.
       this.length = 2 * distance(this.center, position, this.arcType);
       const toward = bearing(this.center, position, this.arcType);
       this.heading = spec.index === 1 ? toward : toward + Math.PI;
       this.invalidate(Dirty.GEOMETRY);
+    } else if (spec.role === "anchor") {
+      // Move this end; the other one stays put.
+      const [a1, a2] = this.anchors();
+      this.setAnchors(spec.index === 0 ? position : a1, spec.index === 0 ? a2 : position);
     } else if (spec.role === "width") {
       this.setWidth(this.#widthAt(position));
     }
