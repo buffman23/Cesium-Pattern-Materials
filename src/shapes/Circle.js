@@ -1,7 +1,7 @@
 import { ArcType, Cartesian3, Math as CesiumMath } from "cesium";
 import Shape, { Dirty, fieldPosition, fromDegrees, toDegrees } from "./Shape.js";
 import ShapeMode from "./ShapeMode.js";
-import { destination, distance, heightOf, sampleArc, withHeight } from "./geodesy.js";
+import { arrivalBearing, destination, distance, heightOf, sampleArc, withHeight } from "./geodesy.js";
 
 const RADIUS_BEARINGS = [0, 90, 180, 270].map(CesiumMath.toRadians);
 
@@ -196,11 +196,9 @@ export default class Circle extends Shape {
     }
     if (this.radius > 0 && this._mode === ShapeMode.EDIT) {
       for (const [i, b] of RADIUS_BEARINGS.entries()) {
-        specs.push({
-          key: `r${i}`,
-          position: sampleArc(this.center, this.radius, b, b, 1, ArcType.GEODESIC, this.pointHeight)[0],
-          role: "radius",
-        });
+        const position = sampleArc(this.center, this.radius, b, b, 1, ArcType.GEODESIC, this.pointHeight)[0];
+        // axis: outward at the marker (for the resize icon).
+        specs.push({ key: `r${i}`, position, role: "radius", axis: arrivalBearing(this.center, position) });
       }
     }
     return specs;

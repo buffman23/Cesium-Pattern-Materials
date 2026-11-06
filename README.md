@@ -110,7 +110,15 @@ editor.selected?.toJSON();                                 // Shape.fromJSON(jso
   edits it again.
 - **Markers:** white squares by default; the image can be changed. Vertex markers can be
   deletable (a red X shows on hover or click) or numbered pins (PinBuilder). A translate
-  marker moves the whole shape. At altitude, shift+drag changes height.
+  marker moves the whole shape. At altitude, shift+drag changes height. Each handle's look
+  shows what it does:
+  - Point handles are white squares.
+  - Circle and Corridor resize handles are cyan double arrows that point the way they resize.
+  - Box handles are squares: orange for the width, white for the ends (anchors, or the
+    center form's rotate-and-lengthen ends).
+  - Sector handles are all white squares.
+  - The `roleStyles` marker option changes any of these per role, per shape class
+    (`static defaultMarkerOptions`) or per shape.
 - **Cursor messages:** while drawing, a small box at the mouse cursor says what to do next,
   such as "Click to set center" or "Click to add vertex". Each shape's `cursorMessages`
   option turns it off (`false`) or supplies your own text (a function). Use the editor's

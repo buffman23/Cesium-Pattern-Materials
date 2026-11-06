@@ -1,6 +1,8 @@
 import {
   Cartesian2,
+  Cartesian3,
   Color,
+  Ellipsoid,
   HorizontalOrigin,
   Material,
   PinBuilder,
@@ -23,6 +25,11 @@ import { withHeight } from "./geodesy.js";
  *  - numbered:       vertex markers are numbered pins (PinBuilder). pinColor / pinSize.
  *  - translatable:   shows a translate marker that moves the whole shape. translateImage.
  *  - groundLine:     at altitude, draws a line from each marker straight down to the ground.
+ *  - roleStyles:     looks per marker role, merged per role over DEFAULT_ROLE_STYLES: resize
+ *                    handles (width, radius) are cyan double arrows that point along the
+ *                    resize direction, rotate handles (end, start) orange circular arrows;
+ *                    other roles use `image`. Hovered and dragged role icons are tinted
+ *                    like squares. E.g. { width: { image: url } }; null removes one.
  */
 export const DEFAULT_MARKER_OPTIONS = Object.freeze({
   image: undefined,
@@ -95,6 +102,29 @@ export function defaultMarkerImage() {
   return SQUARE_SVG;
 }
 
+const coloredSquares = new Map();
+/**
+ * The marker square in a fixed color (e.g. "#29b6f6"), with the same thin black outline; an
+ * SVG data URI. For role styles (hover / drag tint it like the white square).
+ */
+export function coloredMarkerImage(color) {
+  let image = coloredSquares.get(color);
+  if (!image) {
+    image = svgImage(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">' +
+        '<rect width="24" height="24" fill="#000"/>' +
+        `<rect x="2" y="2" width="20" height="20" fill="${color}"/>` +
+        "</svg>",
+    );
+    coloredSquares.set(color, image);
+  }
+  return image;
+}
+
+/** Colors of the resize and rotate icons, for shapes that use colored squares instead. */
+export const RESIZE_COLOR = "#29b6f6";
+export const ROTATE_COLOR = "#ffa726";
+
 /** Red X; an SVG data URI. */
 export function defaultDeleteImage() {
   return DELETE_SVG;
@@ -103,6 +133,80 @@ export function defaultDeleteImage() {
 /** Four-way move arrows, white with a black outline; an SVG data URI. */
 export function defaultTranslateImage() {
   return TRANSLATE_SVG;
+}
+
+// Resize handles: a cyan double-headed arrow, drawn vertical (billboards turn it to point
+// along the resize direction, see spec.axis).
+const RESIZE_SVG = svgImage(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 22 22">' +
+    '<path d="M11 1L17 7.5H13.5V14.5H17L11 21L5 14.5H8.5V7.5H5Z" fill="#29b6f6" ' +
+    'stroke="#08202c" stroke-width="1.4" stroke-linejoin="round"/>' +
+    "</svg>",
+);
+
+// Rotate handles: an orange circular arrow around a center dot.
+const ROTATE_ARC = "M11 4A7 7 0 1 1 4 11";
+const ROTATE_SVG = svgImage(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 22 22">' +
+    `<path d="${ROTATE_ARC}" fill="none" stroke="#2b1700" stroke-width="5" stroke-linecap="round"/>` +
+    `<path d="${ROTATE_ARC}" fill="none" stroke="#ffa726" stroke-width="2.6" stroke-linecap="round"/>` +
+    '<path d="M0.8 11.5L7.2 11.5L4 6.3Z" fill="#ffa726" stroke="#2b1700" stroke-width="1.2" stroke-linejoin="round"/>' +
+    '<circle cx="11" cy="11" r="2.2" fill="#ffa726" stroke="#2b1700" stroke-width="1.2"/>' +
+    "</svg>",
+);
+
+/** Cyan double-headed arrow for resize handles (width, radius); an SVG data URI. */
+export function defaultResizeImage() {
+  return RESIZE_SVG;
+}
+
+/** Orange circular arrow for rotate handles (Box ends, Sector arc ends); an SVG data URI. */
+export function defaultRotateImage() {
+  return ROTATE_SVG;
+}
+
+/**
+ * Marker looks per role (see markerOptions.roleStyles): { image, width, height, align }.
+ * `align`: turn the image so its up points along the marker spec's `axis` (a bearing).
+ * Roles without an entry use the `image` option (default: the white square).
+ */
+export const DEFAULT_ROLE_STYLES = Object.freeze({
+  width: Object.freeze({ image: RESIZE_SVG, width: 22, height: 22, align: true }),
+  radius: Object.freeze({ image: RESIZE_SVG, width: 22, height: 22, align: true }),
+  end: Object.freeze({ image: ROTATE_SVG, width: 22, height: 22 }),
+  start: Object.freeze({ image: ROTATE_SVG, width: 22, height: 22 }),
+});
+
+/** Role styles merged per role: each override's properties replace the defaults' ones. */
+export function mergeRoleStyles(...tables) {
+  const merged = {};
+  for (const table of tables) {
+    for (const [role, style] of Object.entries(table ?? {})) {
+      merged[role] = style ? { ...merged[role], ...style } : undefined; // null removes a role style
+    }
+  }
+  return merged;
+}
+
+const scratchUp = new Cartesian3();
+const scratchEast = new Cartesian3();
+const scratchNorth = new Cartesian3();
+
+// Unit vector in world space pointing along `bearing` at `position`, for alignedAxis.
+function bearingAxis(position, bearing) {
+  const up = Ellipsoid.WGS84.geodeticSurfaceNormal(position, scratchUp);
+  let east = Cartesian3.cross(Cartesian3.UNIT_Z, up, scratchEast);
+  if (Cartesian3.magnitudeSquared(east) < 1e-12) {
+    east = Cartesian3.clone(Cartesian3.UNIT_Y, scratchEast); // at a pole: any east will do
+  }
+  Cartesian3.normalize(east, east);
+  const north = Cartesian3.cross(up, east, scratchNorth);
+  const axis = Cartesian3.add(
+    Cartesian3.multiplyByScalar(east, Math.sin(bearing), new Cartesian3()),
+    Cartesian3.multiplyByScalar(north, Math.cos(bearing), scratchNorth),
+    new Cartesian3(),
+  );
+  return Cartesian3.normalize(axis, axis);
 }
 
 const pinBuilder = new PinBuilder();
@@ -276,10 +380,15 @@ export class MarkerSet {
     let width;
     let height;
     let verticalOrigin = VerticalOrigin.CENTER;
+    const roleStyle = spec.role === "translate" ? undefined : o.roleStyles?.[spec.role];
     if (spec.role === "translate") {
       image = o.translateImage ?? defaultTranslateImage();
       width = 22;
       height = 22;
+    } else if (roleStyle) {
+      image = roleStyle.image;
+      width = roleStyle.width ?? 22;
+      height = roleStyle.height ?? 22;
     } else if (this.#isPin(spec)) {
       image = numberedPinImage(spec.label, o.pinColor, o.pinSize);
       width = o.pinSize;
@@ -294,13 +403,20 @@ export class MarkerSet {
     if (billboard.image !== id) {
       billboard.setImage(id, image);
     }
+    billboard.verticalOrigin = verticalOrigin;
+    // Resize icons point along their resize direction whatever the camera heading.
+    billboard.alignedAxis =
+      roleStyle?.align && spec.axis !== undefined
+        ? bearingAxis(spec.position, spec.axis)
+        : Cartesian3.ZERO;
+    const active = spec.key === this.activeKey;
+    const hover = spec.key === this.hoverKey;
     billboard.width = width * o.scale;
     billboard.height = height * o.scale;
-    billboard.verticalOrigin = verticalOrigin;
-    // Pins keep their own colors; only tint them when active.
-    const base = this.#isPin(spec) ? Color.WHITE : o.color;
-    billboard.color =
-      spec.key === this.activeKey ? o.activeColor : spec.key === this.hoverKey ? o.hoverColor : base;
+    // Same highlight for every marker: hoverColor on hover, activeColor while dragged.
+    // Colored role icons and pins keep their own colors otherwise (untinted).
+    const base = roleStyle || this.#isPin(spec) ? Color.WHITE : o.color;
+    billboard.color = active ? o.activeColor : hover ? o.hoverColor : base;
   }
 
   #syncDelete() {

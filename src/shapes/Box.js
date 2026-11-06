@@ -1,6 +1,7 @@
 import { Cartesian3, Math as CesiumMath } from "cesium";
 import Shape, { Dirty, fieldPosition, fromDegrees, toDegrees } from "./Shape.js";
 import ShapeMode from "./ShapeMode.js";
+import { ROTATE_COLOR, coloredMarkerImage } from "./Markers.js";
 import {
   arrivalBearing,
   bearing,
@@ -32,6 +33,15 @@ export const BoxForm = Object.freeze({ ANCHORS: "anchors", CENTER: "center" });
  */
 export default class Box extends Shape {
   static type = "Box";
+
+  // Square markers: orange ones change the width; the ends (anchors, or the center form's
+  // rotate-and-lengthen ends) are white.
+  static defaultMarkerOptions = {
+    roleStyles: {
+      width: { image: coloredMarkerImage(ROTATE_COLOR), width: 12, height: 12, align: false },
+      end: null,
+    },
+  };
 
   static fields = [
     ...super.fields,
@@ -381,10 +391,13 @@ export default class Box extends Shape {
         ];
     const half = this.width / 2;
     if (this.length > 0) {
-      specs.push(
-        { key: "side1", position: destination(center, this.heading - HALF_PI, half, this.arcType), role: "width" },
-        { key: "side2", position: destination(center, this.heading + HALF_PI, half, this.arcType), role: "width" },
-      );
+      for (const [key, side] of [["side1", -HALF_PI], ["side2", HALF_PI]]) {
+        const bearingOut = this.heading + side;
+        const position = destination(center, bearingOut, half, this.arcType);
+        // axis: the direction the width changes in, at the marker (for the resize icon).
+        const axis = half > 0 ? arrivalBearing(center, position, this.arcType) : bearingOut;
+        specs.push({ key, position, role: "width", axis });
+      }
     }
     specs.push(...this.translateSpec(center));
     return specs;

@@ -1,7 +1,7 @@
 import { Cartesian3, Math as CesiumMath } from "cesium";
 import Shape, { Dirty, fieldPosition, fromDegrees, toDegrees } from "./Shape.js";
 import ShapeMode from "./ShapeMode.js";
-import { bearing, clockwiseSweep, distance, sampleArc } from "./geodesy.js";
+import { arrivalBearing, bearing, clockwiseSweep, distance, sampleArc } from "./geodesy.js";
 
 /**
  * A pie slice: from `center` out to `radius` meters, between `startBearing` and
@@ -14,6 +14,9 @@ import { bearing, clockwiseSweep, distance, sampleArc } from "./geodesy.js";
  */
 export default class Sector extends Shape {
   static type = "Sector";
+
+  // Plain white square markers for every handle (no resize / rotate icons).
+  static defaultMarkerOptions = { roleStyles: { radius: null, start: null, end: null } };
 
   static fields = [
     ...super.fields,
@@ -237,7 +240,13 @@ export default class Sector extends Shape {
       specs.push(
         { key: "start", position: this.#pointAt(this.startBearing), role: "start" },
         { key: "end", position: this.#pointAt(this.startBearing + this.sweep), role: "end" },
-        { key: "mid", position: this.#pointAt(this.startBearing + this.sweep / 2), role: "radius" },
+        {
+          key: "mid",
+          position: this.#pointAt(this.startBearing + this.sweep / 2),
+          role: "radius",
+          // axis: outward at the marker (for the resize icon).
+          axis: arrivalBearing(this.center, this.#pointAt(this.startBearing + this.sweep / 2), this.arcType),
+        },
       );
     }
     return specs;

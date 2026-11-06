@@ -389,9 +389,33 @@ export default class ShapeEditor {
   }
 
   #pickedId(windowPosition) {
-    const picked = this.scene.pick(windowPosition);
-    const id = picked?.id;
-    return id?.shape instanceof Shape && id.shape.editor === this ? id : undefined;
+    const ours = (id) => id?.shape instanceof Shape && id.shape.editor === this;
+    const id = this.scene.pick(windowPosition)?.id;
+    if (!ours(id) || id.kind !== "marker") {
+      return ours(id) ? id : undefined;
+    }
+    // Markers can overlap (e.g. a narrow box's width handles and its translate marker): take
+    // the one whose center is nearest the cursor, so each stays grabbable by its middle. Only
+    // markers are drilled, so ordinary picks cost no more than before.
+    const markers = this.scene
+      .drillPick(windowPosition, 6)
+      .map((picked) => picked.id)
+      .filter((other) => ours(other) && other.kind === "marker" && other.shape === id.shape);
+    if (markers.length < 2) {
+      return id;
+    }
+    let best = id;
+    let bestDistance = Infinity;
+    for (const candidate of markers) {
+      const spec = candidate.shape.markers?.spec(candidate.key);
+      const center = spec && this.scene.cartesianToCanvasCoordinates(spec.position);
+      const d = center ? Cartesian2.distance(center, windowPosition) : Infinity;
+      if (d < bestDistance) {
+        bestDistance = d;
+        best = candidate;
+      }
+    }
+    return best;
   }
 
   #onLeftClick(e) {

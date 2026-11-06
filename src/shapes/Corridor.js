@@ -2,6 +2,7 @@ import { CornerType, CorridorGeometry, MaterialAppearance } from "cesium";
 import Shape, { Dirty, clonePositions } from "./Shape.js";
 import VertexShape from "./VertexShape.js";
 import {
+  arrivalBearing,
   bearing,
   corridorOutline,
   crossTrackDistance,
@@ -129,13 +130,11 @@ export default class Corridor extends VertexShape {
     const [a, b] = this.drawPositions();
     const middle = interpolate(a, b, 0.5, this.arcType);
     const heading = bearing(middle, b, this.arcType);
-    return [
-      {
-        key: "width",
-        position: destination(middle, heading + Math.PI / 2, this.width / 2, this.arcType),
-        role: "width",
-      },
-    ];
+    const out = heading + Math.PI / 2;
+    const position = destination(middle, out, this.width / 2, this.arcType);
+    // axis: the direction the width changes in, at the marker (for the resize icon).
+    const axis = this.width > 0 ? arrivalBearing(middle, position, this.arcType) : out;
+    return [{ key: "width", position, role: "width", axis }];
   }
 
   onMarkerDrag(spec, position) {

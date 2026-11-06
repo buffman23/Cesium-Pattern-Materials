@@ -13,8 +13,12 @@ export * from "./materials.js";
 export * as geodesy from "./geodesy.js";
 export {
   DEFAULT_MARKER_OPTIONS,
+  DEFAULT_ROLE_STYLES,
   defaultMarkerImage,
+  coloredMarkerImage,
   defaultDeleteImage,
   defaultTranslateImage,
+  defaultResizeImage,
+  defaultRotateImage,
   numberedPinImage,
 } from "./Markers.js";

@@ -19,7 +19,12 @@ import {
 } from "cesium";
 import ShapeMode from "./ShapeMode.js";
 import { createPolygonGeometry, isWidePolygon } from "./liftedPolygon.js";
-import { DEFAULT_MARKER_OPTIONS, MarkerSet } from "./Markers.js";
+import {
+  DEFAULT_MARKER_OPTIONS,
+  DEFAULT_ROLE_STYLES,
+  MarkerSet,
+  mergeRoleStyles,
+} from "./Markers.js";
 import {
   DEFAULT_DETAIL,
   centroid,
@@ -212,6 +217,12 @@ export default class Shape {
       ...DEFAULT_MARKER_OPTIONS,
       ...this.constructor.defaultMarkerOptions,
       ...options.markers,
+      // Per role, so overriding one role's look keeps the others' defaults.
+      roleStyles: mergeRoleStyles(
+        DEFAULT_ROLE_STYLES,
+        this.constructor.defaultMarkerOptions.roleStyles,
+        options.markers?.roleStyles,
+      ),
     };
     this.detail = { ...DEFAULT_DETAIL, ...options.detail };
     this.properties = options.properties ?? {};
@@ -388,7 +399,11 @@ export default class Shape {
   }
 
   setMarkerOptions(options) {
-    Object.assign(this.markerOptions, options);
+    const { roleStyles, ...rest } = options;
+    Object.assign(this.markerOptions, rest);
+    if (roleStyles) {
+      this.markerOptions.roleStyles = mergeRoleStyles(this.markerOptions.roleStyles, roleStyles);
+    }
     this._markers?.restyleAll();
     this.invalidate(Dirty.MARKERS);
   }
