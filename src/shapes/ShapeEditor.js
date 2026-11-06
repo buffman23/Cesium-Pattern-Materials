@@ -546,9 +546,13 @@ export default class ShapeEditor {
       return;
     }
     drag.moved = true;
-    if ((this._shift || spec.vertical) && !shape.clampToGround) {
-      // Vertical drag (shift, or markers that only move up / down): pixels up -> meters up,
-      // at the marker's distance from the camera.
+    // Modifiers for the shape (e.g. shift+drag on a corridor radius scales every radius).
+    const modifiers = { shift: this._shift };
+    // Vertical drag: markers that only move up / down, or shift unless the marker uses shift
+    // for something else (spec.shiftVertical === false).
+    const vertical = spec.vertical || (this._shift && spec.shiftVertical !== false);
+    if (vertical && !shape.clampToGround) {
+      // Pixels up -> meters up, at the marker's distance from the camera.
       const pixels = e.startPosition.y - e.endPosition.y;
       const scene = this.scene;
       const metersPerPixel =
@@ -559,7 +563,7 @@ export default class ShapeEditor {
         ) *
         (scene.drawingBufferHeight / Math.max(scene.canvas.clientHeight, 1));
       drag.height = Math.max(drag.height + pixels * metersPerPixel, 0);
-      shape.onMarkerHeight(spec, drag.height);
+      shape.onMarkerHeight(spec, drag.height, modifiers);
       return;
     }
     const position = this.pickPosition(e.endPosition, drag.height);
@@ -569,7 +573,7 @@ export default class ShapeEditor {
     if (spec.role === "translate") {
       shape.translate(drag.last, position);
     } else {
-      shape.onMarkerDrag(spec, position);
+      shape.onMarkerDrag(spec, position, modifiers);
     }
     drag.last = position;
   }

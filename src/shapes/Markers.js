@@ -124,6 +124,8 @@ export function coloredMarkerImage(color) {
 /** Colors of the resize and rotate icons, for shapes that use colored squares instead. */
 export const RESIZE_COLOR = "#29b6f6";
 export const ROTATE_COLOR = "#ffa726";
+/** Yellow of size handles drawn as squares (Box width, Corridor radius). */
+export const WIDTH_COLOR = "#ffeb3b";
 
 /** Red X; an SVG data URI. */
 export function defaultDeleteImage() {

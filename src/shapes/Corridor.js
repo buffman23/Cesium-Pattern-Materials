@@ -2,6 +2,7 @@ import { ArcType, Cartesian2, Cartesian3 } from "cesium";
 import Shape, { Dirty, fieldPosition, fromDegrees } from "./Shape.js";
 import ShapeMode from "./ShapeMode.js";
 import VertexShape from "./VertexShape.js";
+import { ROTATE_COLOR, WIDTH_COLOR, coloredMarkerImage } from "./Markers.js";
 import {
   arrivalBearing,
   bearing,
@@ -32,14 +33,24 @@ const BOTTOM_OFFSET = new Cartesian2(0, 7);
  * Clamped to the ground, only the footprint (all circles and their tangent sides) is drawn;
  * otherwise the volume between the floors and ceilings. See corridorGeometry.js.
  *
- * Markers per vertex: the vertex (moves it; shift+drag raises the whole cylinder), a radius
- * marker on its circle and, at altitude, top and bottom markers dragged up / down for the max
- * and min altitude. New vertices copy the previous vertex's radius and altitudes.
+ * Markers per vertex: the vertex (white; moves it, shift+drag raises the whole cylinder), a
+ * yellow radius square on its circle and, at altitude, orange top and bottom squares dragged
+ * up / down for the max and min altitude. With shift, a radius square scales every radius
+ * and an altitude square every max (or min) altitude, by the same factor. New vertices copy
+ * the previous vertex's radius and altitudes.
  */
 export default class Corridor extends VertexShape {
   static type = "Corridor";
   static minVertices = 2;
   static singleHeight = true;
+
+  static defaultMarkerOptions = {
+    ...VertexShape.defaultMarkerOptions,
+    roleStyles: {
+      radius: { image: coloredMarkerImage(WIDTH_COLOR), width: 12, height: 12, align: false },
+      altitude: { image: coloredMarkerImage(ROTATE_COLOR), width: 12, height: 12, align: false },
+    },
+  };
 
   static fields = [
     ...super.fields.filter((f) => f.name !== "positions" && f.name !== "height"),
@@ -168,6 +179,42 @@ export default class Corridor extends VertexShape {
 
   setAltitudeMode(mode) {
     this.altitudeMode = mode === AltitudeMode.STEP ? AltitudeMode.STEP : AltitudeMode.SLOPE;
+    this.invalidate(Dirty.GEOMETRY);
+  }
+
+  /** Multiplies every vertex's radius by `factor` (each stays at least 1 m). */
+  scaleRadii(factor) {
+    if (!(factor > 0)) {
+      return;
+    }
+    this.radii = this.radii.map((r) => Math.max(r * factor, 1));
+    this.invalidate(Dirty.GEOMETRY);
+  }
+
+  /**
+   * Multiplies every max ("max") or every min ("min") altitude by `factor`. Each vertex keeps
+   * max >= min: maxes stop at their own min, mins at their own max (and at 0).
+   */
+  scaleAltitudes(which, factor) {
+    if (!(factor >= 0)) {
+      return;
+    }
+    this.#changeAltitudes(which, (h) => h * factor);
+  }
+
+  /** Moves every max ("max") or every min ("min") altitude by `delta` meters (same limits). */
+  offsetAltitudes(which, delta) {
+    this.#changeAltitudes(which, (h) => h + delta);
+  }
+
+  #changeAltitudes(which, change) {
+    for (let i = 0; i < this.positions.length; i++) {
+      if (which === "max") {
+        this.maxAltitudes[i] = Math.max(change(this.maxAltitudes[i]), this.minAltitudes[i]);
+      } else {
+        this.minAltitudes[i] = Math.min(Math.max(change(this.minAltitudes[i]), 0), this.maxAltitudes[i]);
+      }
+    }
     this.invalidate(Dirty.GEOMETRY);
   }
 
@@ -324,7 +371,16 @@ export default class Corridor extends VertexShape {
       const direction = this.#direction(i);
       const radius = this.radii[i];
       const side = destination(p, direction - HALF_PI, radius, ArcType.GEODESIC, mid);
-      specs.push({ key: `r${i}`, position: side, role: "radius", index: i, axis: arrivalBearing(center, side) });
+      // shiftVertical: false - with shift this marker still drags sideways (and scales every
+      // radius), instead of the usual shift+drag height change.
+      specs.push({
+        key: `r${i}`,
+        position: side,
+        role: "radius",
+        index: i,
+        axis: arrivalBearing(center, side),
+        shiftVertical: false,
+      });
       if (!this.clampToGround) {
         // On the circle opposite the radius marker, at the ceiling and the floor.
         const top = destination(p, direction + HALF_PI, radius, ArcType.GEODESIC, this.maxAltitudes[i]);
@@ -347,11 +403,17 @@ export default class Corridor extends VertexShape {
     return withHeight(anchor, mids.reduce((sum, h) => sum + h, 0) / mids.length);
   }
 
-  onMarkerDrag(spec, position) {
+  onMarkerDrag(spec, position, { shift = false } = {}) {
     if (spec.role === "vertex") {
       this.setVertex(spec.index, withHeight(position, 0));
     } else if (spec.role === "radius") {
-      this.setVertexRadius(spec.index, distance(this.positions[spec.index], position));
+      const radius = distance(this.positions[spec.index], position);
+      if (shift) {
+        // Every radius by the factor that takes this one to the cursor.
+        this.scaleRadii(Math.max(radius, 1) / this.radii[spec.index]);
+      } else {
+        this.setVertexRadius(spec.index, radius);
+      }
     }
   }
 
@@ -367,10 +429,24 @@ export default class Corridor extends VertexShape {
     return this.#midHeight(spec.index ?? 0);
   }
 
-  /** Vertical drags: altitude markers set min / max; shift+drag on others raises cylinders. */
-  onMarkerHeight(spec, height) {
+  /**
+   * Vertical drags: altitude markers set min / max (with shift: every min or every max, by
+   * the same factor); shift+drag on others raises cylinders.
+   */
+  onMarkerHeight(spec, height, { shift = false } = {}) {
     if (spec.role === "altitude") {
       const i = spec.index;
+      if (shift) {
+        const values = spec.which === "max" ? this.maxAltitudes : this.minAltitudes;
+        const current = values[i];
+        // From 0 there's no factor: move them all by the same amount instead.
+        if (current > 0) {
+          this.scaleAltitudes(spec.which, Math.max(height, 0) / current);
+        } else {
+          this.offsetAltitudes(spec.which, height - current);
+        }
+        return;
+      }
       if (spec.which === "max") {
         this.setVertexAltitudes(i, this.minAltitudes[i], Math.max(height, this.minAltitudes[i]));
       } else {

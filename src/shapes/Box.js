@@ -1,7 +1,7 @@
 import { Cartesian3, Math as CesiumMath } from "cesium";
 import Shape, { Dirty, fieldPosition, fromDegrees, toDegrees } from "./Shape.js";
 import ShapeMode from "./ShapeMode.js";
-import { coloredMarkerImage } from "./Markers.js";
+import { WIDTH_COLOR, coloredMarkerImage } from "./Markers.js";
 import {
   arrivalBearing,
   bearing,
@@ -13,7 +13,6 @@ import {
 } from "./geodesy.js";
 
 const HALF_PI = CesiumMath.PI_OVER_TWO;
-const WIDTH_COLOR = "#ffeb3b"; // yellow width markers
 
 /** The two ways a Box can be defined (see Box). */
 export const BoxForm = Object.freeze({ ANCHORS: "anchors", CENTER: "center" });
