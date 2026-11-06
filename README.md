@@ -111,6 +111,18 @@ editor.selected?.toJSON();                                 // Shape.fromJSON(jso
   such as "Click to set center" or "Click to add vertex". Each shape's `cursorMessages`
   option turns it off (`false`) or supplies your own text (a function). Use the editor's
   `cursorMessage` option to style it, offset it or turn it off everywhere.
+- **Forms and binding:** each shape type lists its editable fields in `static fields` (name,
+  label, type, limits). `getField` / `setField` read and write them in degrees and meters,
+  with validation. `editor.shapeChanged` says which fields changed and whether drawing, a
+  drag or code changed them. The demo's right-hand panel is built only from these:
+
+  ```js
+  for (const field of shape.fields) console.log(field.label, shape.getField(field.name));
+  shape.setField("radius", 25000);           // meters; rebuilds on the next frame
+  editor.shapeChanged.addEventListener((shape, { fields, source }) => {
+    for (const name of fields) updateInput(name, shape.getField(name)); // source: draw|drag|api
+  });
+  ```
 - **Performance:** a changed shape is rebuilt at most once per frame, and coarser while it is
   being drawn or dragged. A whole shape is one fill primitive plus its outline primitives.
   Only the shape being edited has billboards. Per-frame material updates skip shapes outside

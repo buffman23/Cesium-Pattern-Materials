@@ -284,6 +284,184 @@ for (const key of ["deletable", "numbered", "translatable", "groundLine"]) {
   controls[key].addEventListener("change", onSelected((s) => s.setMarkerOptions(markerOptions())));
 }
 
+// --- Selected shape form -------------------------------------------------------------------
+// Built only from shape.fields / getField / setField, so it works for every shape type
+// (custom subclasses included) without knowing any of them. It follows the shape being drawn,
+// or else the selected one, and refreshes from editor.shapeChanged.
+const fieldsPanel = $("fieldsPanel");
+const fieldsTitle = $("fieldsTitle");
+const fieldsBody = $("fieldsBody");
+let formShape;
+const formRows = new Map(); // field name -> { field, update(value) }
+
+const UNITS = { distance: "m", angle: "°" };
+const DECIMALS = { distance: 1, angle: 3, number: 3 };
+const showNumber = (value, decimals) => (value === null || value === undefined ? "" : String(+value.toFixed(decimals)));
+
+function numberInput(onChange) {
+  const input = document.createElement("input");
+  input.type = "number";
+  input.step = "any";
+  input.addEventListener("change", onChange);
+  return input;
+}
+
+// Sets a field from the form; on a bad value shows the message and reverts the inputs.
+function apply(row, value) {
+  try {
+    formShape.setField(row.field.name, value);
+    row.error.textContent = "";
+  } catch (error) {
+    row.error.textContent = error.message;
+  }
+  row.update(formShape.getField(row.field.name), { force: true });
+}
+
+const focusedIn = (element) => element.contains(document.activeElement);
+
+// [lon, lat, height] editor: three inputs; `onChange` gets the edited triple.
+function positionInputs(container, onChange) {
+  const inputs = [0, 1, 2].map(() => numberInput(() => onChange(inputs.map((i) => i.value))));
+  container.append(...inputs);
+  return (value) => {
+    inputs.forEach((input, i) => {
+      input.value = value ? showNumber(value[i], i < 2 ? 6 : 1) : "";
+    });
+  };
+}
+
+function fieldRow(field) {
+  const element = document.createElement("div");
+  element.className = "field";
+  const label = document.createElement("label");
+  label.textContent = UNITS[field.type] ? `${field.label} (${UNITS[field.type]})` : field.label;
+  const error = document.createElement("div");
+  error.className = "error";
+  const row = { field, element, error, update: () => {} };
+
+  if (field.type === "boolean") {
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.addEventListener("change", () => apply(row, input.checked));
+    label.prepend(input, " ");
+    element.append(label);
+    row.update = (value) => {
+      input.checked = Boolean(value);
+    };
+  } else if (field.type === "enum") {
+    const select = document.createElement("select");
+    for (const option of field.options) {
+      select.append(new Option(option, option));
+    }
+    select.addEventListener("change", () => apply(row, select.value));
+    element.append(label, select);
+    row.update = (value) => {
+      select.value = value ?? "";
+    };
+  } else if (field.type === "position") {
+    const triple = document.createElement("div");
+    triple.className = "triple";
+    const set = positionInputs(triple, (value) => apply(row, value));
+    element.append(label, triple);
+    row.update = (value, { force } = {}) => {
+      if (force || !focusedIn(triple)) {
+        set(value);
+      }
+    };
+  } else if (field.type === "positions") {
+    const list = document.createElement("div");
+    const header = document.createElement("div");
+    header.className = "vertex columns";
+    header.innerHTML = "<span>#</span><span>Lon °</span><span>Lat °</span><span>Height m</span><span></span>";
+    element.append(label, header, list);
+    let setters = [];
+    row.update = (value, { force } = {}) => {
+      const positions = value ?? [];
+      label.textContent = `${field.label} (${positions.length})`;
+      if (setters.length !== positions.length) {
+        // Vertex count changed: rebuild the rows.
+        list.replaceChildren();
+        setters = positions.map((_, index) => {
+          const vertex = document.createElement("div");
+          vertex.className = "vertex";
+          const number = document.createElement("span");
+          number.textContent = index + 1;
+          vertex.append(number);
+          const set = positionInputs(vertex, (edited) => {
+            const next = formShape.getField(field.name);
+            next[index] = edited;
+            apply(row, next);
+          });
+          const remove = document.createElement("button");
+          remove.textContent = "✕";
+          remove.title = "Remove vertex";
+          remove.disabled = positions.length <= (field.min ?? 0);
+          remove.addEventListener("click", () => {
+            const next = formShape.getField(field.name);
+            next.splice(index, 1);
+            apply(row, next);
+          });
+          vertex.append(remove);
+          list.append(vertex);
+          return { vertex, set };
+        });
+      }
+      positions.forEach((position, index) => {
+        const { vertex, set } = setters[index];
+        if (force || !focusedIn(vertex)) {
+          set(position);
+        }
+      });
+    };
+  } else {
+    const input = numberInput(() => apply(row, input.value));
+    element.append(label, input);
+    const decimals = DECIMALS[field.type] ?? 3;
+    row.update = (value, { force } = {}) => {
+      if (force || document.activeElement !== input) {
+        input.value = showNumber(value, decimals);
+      }
+    };
+  }
+  element.append(error);
+  return row;
+}
+
+function showForm(shape) {
+  formShape = shape;
+  formRows.clear();
+  fieldsBody.replaceChildren();
+  fieldsPanel.hidden = !shape;
+  if (!shape) {
+    return;
+  }
+  fieldsTitle.textContent = `${shape.constructor.type} (${shape.id}) — ${shape.mode}`;
+  for (const field of shape.fields) {
+    const row = fieldRow(field);
+    formRows.set(field.name, row);
+    fieldsBody.append(row.element);
+    row.update(shape.getField(field.name), { force: true });
+  }
+}
+
+const formTarget = () => editor.drawing ?? editor.selected;
+editor.selectionChanged.addEventListener(() => showForm(formTarget()));
+editor.shapeRemoved.addEventListener(() => showForm(formTarget()));
+editor.shapeChanged.addEventListener((shape, change) => {
+  const target = formTarget();
+  if (target !== formShape) {
+    showForm(target); // e.g. drawing just started
+    return;
+  }
+  if (shape !== formShape) {
+    return;
+  }
+  fieldsTitle.textContent = `${shape.constructor.type} (${shape.id}) — ${shape.mode}`;
+  for (const name of change.fields) {
+    formRows.get(name)?.update(shape.getField(name));
+  }
+});
+
 // --- Export / import -----------------------------------------------------------------------
 // In the devtools console: `shapesApp.exportState()` copies the shapes and camera as JSON;
 // `shapesApp.importState(json)` recreates them.

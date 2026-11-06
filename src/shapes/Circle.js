@@ -1,5 +1,5 @@
 import { ArcType, Cartesian3, Math as CesiumMath } from "cesium";
-import Shape, { Dirty, fromDegrees, toDegrees } from "./Shape.js";
+import Shape, { Dirty, fieldPosition, fromDegrees, toDegrees } from "./Shape.js";
 import ShapeMode from "./ShapeMode.js";
 import { destination, distance, heightOf, sampleArc, withHeight } from "./geodesy.js";
 
@@ -14,6 +14,26 @@ const RADIUS_BEARINGS = [0, 90, 180, 270].map(CesiumMath.toRadians);
  */
 export default class Circle extends Shape {
   static type = "Circle";
+
+  // No arcType: a circle is defined by distance alone.
+  static fields = [
+    ...super.fields.filter((f) => f.name !== "arcType"),
+    {
+      name: "center",
+      label: "Center",
+      type: "position",
+      get: (s) => s.center && fieldPosition(s.center),
+      set: (s, v) => s.setCenter(fromDegrees(v)),
+    },
+    {
+      name: "radius",
+      label: "Radius",
+      type: "distance",
+      min: 0,
+      get: (s) => s.radius,
+      set: (s, v) => s.setRadius(v),
+    },
+  ];
 
   /**
    * @param {object} [options] Shape options, plus:

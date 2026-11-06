@@ -1,5 +1,5 @@
 import { Cartesian3 } from "cesium";
-import Shape, { Dirty, fromDegrees, toDegrees } from "./Shape.js";
+import Shape, { Dirty, fieldPosition, fromDegrees, toDegrees } from "./Shape.js";
 import ShapeMode from "./ShapeMode.js";
 import { heightOf, withHeight } from "./geodesy.js";
 
@@ -17,6 +17,18 @@ export default class VertexShape extends Shape {
   static minVertices = 2;
   static singleHeight = false;
   static defaultMarkerOptions = { deletable: true };
+
+  static fields = [
+    ...super.fields,
+    {
+      name: "positions",
+      label: "Vertices",
+      type: "positions",
+      min: (s) => s.constructor.minVertices,
+      get: (s) => s.positions.map(fieldPosition),
+      set: (s, v) => s.setPositions(v.map(fromDegrees)),
+    },
+  ];
 
   /**
    * @param {object} [options] Shape options, plus:
@@ -56,6 +68,28 @@ export default class VertexShape extends Shape {
   setPositions(positions) {
     this.positions = positions.map((p) => Cartesian3.clone(p));
     this.invalidate(Dirty.GEOMETRY);
+  }
+
+  /** Moves one vertex. */
+  setVertex(index, position) {
+    if (index < 0 || index >= this.positions.length) {
+      throw new RangeError(`No vertex ${index}; the shape has ${this.positions.length}.`);
+    }
+    this.positions[index] = Cartesian3.clone(position);
+    this.invalidate(Dirty.GEOMETRY);
+  }
+
+  /** Removes one vertex; false (and nothing removed) at the minimum vertex count. */
+  removeVertex(index) {
+    if (index < 0 || index >= this.positions.length) {
+      throw new RangeError(`No vertex ${index}; the shape has ${this.positions.length}.`);
+    }
+    if (this.positions.length <= this.constructor.minVertices) {
+      return false;
+    }
+    this.positions.splice(index, 1);
+    this.invalidate(Dirty.GEOMETRY);
+    return true;
   }
 
   getControlPoints() {
@@ -162,17 +196,12 @@ export default class VertexShape extends Shape {
   }
 
   deleteMarker(spec) {
-    if (spec.role !== "vertex" || this.positions.length <= this.constructor.minVertices) {
-      return false;
-    }
-    this.positions.splice(spec.index, 1);
-    this.invalidate(Dirty.GEOMETRY);
-    return true;
+    return spec.role === "vertex" && this.removeVertex(spec.index);
   }
 
   /** Inserts a vertex before `index` (e.g. for custom insert markers). */
   insertVertex(index, position) {
-    this.positions.splice(index, 0, position);
+    this.positions.splice(index, 0, Cartesian3.clone(position));
     this.invalidate(Dirty.GEOMETRY);
   }
 }

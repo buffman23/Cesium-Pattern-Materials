@@ -29,3 +29,100 @@
   color: #9fc4ff;
   margin-top: 4px;
 }
+
+/* Selected shape form (right side). */
+#fieldsPanel {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 340px;
+  max-height: calc(100% - 40px);
+  overflow-y: auto;
+  padding: 8px;
+  border-radius: 6px;
+  background: rgba(42, 42, 42, 0.85);
+  color: #eee;
+  font: 12px/1.4 system-ui, sans-serif;
+}
+
+#fieldsPanel[hidden] {
+  display: none;
+}
+
+#fieldsTitle {
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: #9fc4ff;
+}
+
+#fieldsPanel .field {
+  margin-bottom: 8px;
+}
+
+#fieldsPanel .field > label {
+  display: block;
+  color: #bbb;
+  margin-bottom: 2px;
+}
+
+#fieldsPanel input[type="number"],
+#fieldsPanel select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 3px 4px;
+  border: 1px solid #666;
+  border-radius: 4px;
+  background: #3a3a3a;
+  color: #eee;
+  font: inherit;
+}
+
+#fieldsPanel .triple {
+  display: grid;
+  grid-template-columns: 1.3fr 1.3fr 0.8fr;
+  gap: 4px;
+}
+
+#fieldsPanel .vertex {
+  display: grid;
+  grid-template-columns: 16px 1.3fr 1.3fr 0.8fr 22px;
+  gap: 4px;
+  align-items: center;
+  margin-bottom: 3px;
+}
+
+#fieldsPanel .vertex button {
+  padding: 0;
+  height: 22px;
+  border: 1px solid #666;
+  border-radius: 4px;
+  background: #3a3a3a;
+  color: #ff6b6b;
+  cursor: pointer;
+}
+
+#fieldsPanel .vertex button:disabled {
+  color: #666;
+  cursor: default;
+}
+
+#fieldsPanel .columns {
+  color: #888;
+}
+
+#fieldsPanel .error {
+  color: #ff8080;
+  min-height: 0;
+}
+
+/* No spinner buttons: they hide the digits of long coordinates. */
+#fieldsPanel input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+#fieldsPanel input[type="number"]::-webkit-inner-spin-button,
+#fieldsPanel input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}

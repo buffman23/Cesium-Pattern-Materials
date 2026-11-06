@@ -1,6 +1,6 @@
 export { default as ShapeMode } from "./ShapeMode.js";
 export { default as ShapeEditor } from "./ShapeEditor.js";
-export { default as Shape, Dirty, fromDegrees, toDegrees } from "./Shape.js";
+export { default as Shape, Dirty, fieldPosition, fromDegrees, toDegrees, validateField } from "./Shape.js";
 export { default as VertexShape } from "./VertexShape.js";
 export { default as Polyline } from "./Polyline.js";
 export { default as Polygon } from "./Polygon.js";

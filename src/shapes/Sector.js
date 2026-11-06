@@ -1,5 +1,5 @@
 import { Cartesian3, Math as CesiumMath } from "cesium";
-import Shape, { Dirty, fromDegrees, toDegrees } from "./Shape.js";
+import Shape, { Dirty, fieldPosition, fromDegrees, toDegrees } from "./Shape.js";
 import ShapeMode from "./ShapeMode.js";
 import { bearing, clockwiseSweep, distance, sampleArc } from "./geodesy.js";
 
@@ -14,6 +14,39 @@ import { bearing, clockwiseSweep, distance, sampleArc } from "./geodesy.js";
  */
 export default class Sector extends Shape {
   static type = "Sector";
+
+  static fields = [
+    ...super.fields,
+    {
+      name: "center",
+      label: "Center",
+      type: "position",
+      get: (s) => s.center && fieldPosition(s.center),
+      set: (s, v) => s.setCenter(fromDegrees(v)),
+    },
+    {
+      name: "radius",
+      label: "Radius",
+      type: "distance",
+      min: 0,
+      get: (s) => s.radius,
+      set: (s, v) => s.setRadius(v),
+    },
+    {
+      name: "startBearing",
+      label: "Start bearing",
+      type: "angle",
+      get: (s) => CesiumMath.toDegrees(CesiumMath.zeroToTwoPi(s.startBearing)),
+      set: (s, v) => s.setStartBearing(CesiumMath.toRadians(v)),
+    },
+    {
+      name: "endBearing",
+      label: "End bearing",
+      type: "angle",
+      get: (s) => CesiumMath.toDegrees(CesiumMath.zeroToTwoPi(s.endBearing)),
+      set: (s, v) => s.setEndBearing(CesiumMath.toRadians(v)),
+    },
+  ];
 
   /**
    * @param {object} [options] Shape options, plus:
@@ -52,6 +85,28 @@ export default class Sector extends Shape {
   /** Clockwise angle from start to end, radians. */
   get sweep() {
     return clockwiseSweep(this.startBearing, this.endBearing);
+  }
+
+  setCenter(center) {
+    this.center = Cartesian3.clone(center);
+    this.invalidate(Dirty.GEOMETRY);
+  }
+
+  setRadius(radius) {
+    this.radius = Math.max(radius, 0);
+    this.invalidate(Dirty.GEOMETRY);
+  }
+
+  /** Radians clockwise from north. */
+  setStartBearing(bearing) {
+    this.startBearing = bearing;
+    this.invalidate(Dirty.GEOMETRY);
+  }
+
+  /** Radians clockwise from north; the sector runs clockwise from the start bearing to it. */
+  setEndBearing(bearing) {
+    this.endBearing = bearing;
+    this.invalidate(Dirty.GEOMETRY);
   }
 
   getControlPoints() {

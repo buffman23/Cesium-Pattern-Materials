@@ -70,6 +70,8 @@ export default class ShapeEditor {
     this.shapeRemoved = new Event();
     this.selectionChanged = new Event(); // (shape | undefined, previous | undefined)
     this.hint = new Event(); // (text)
+    /** Raised with (shape, { fields, source, interactive }) for every shape: see Shape. */
+    this.shapeChanged = new Event();
 
     this.primitives = this.scene.primitives.add(new PrimitiveCollection());
     this.groundLines = this.scene.primitives.add(new PolylineCollection());

@@ -75,11 +75,48 @@ let nextId = 1;
  *  - createFillGeometry() -> geometry description | undefined
  *  - outlineLines() -> [{ positions, loop?, key?, width? }]
  *  - stateToJSON() and static stateFromJSON(json) -> constructor options
+ *  - static fields: the fields a form can show and edit (see below)
+ *
+ * Forms and binding: `static fields` describes each editable field as
+ *   { name, label, type, min?, max?, options?, get(shape), set(shape, value) }
+ * with types "position" ([lon°, lat°, height m]), "positions" (an array of those), "distance"
+ * (meters), "angle" (degrees), "number", "boolean" and "enum" (one of `options`). Read and
+ * write them with getField / setField / getFields, which convert units, validate and
+ * rebuild. `changed` (and the editor's `shapeChanged`) is raised with
+ * (shape, { fields, source, interactive }): the names of the fields that changed this frame,
+ * and whether the change came from drawing ("draw"), a marker drag ("drag") or code ("api").
  */
 export default class Shape {
   static type = "Shape";
   static hasFill = true;
   static defaultMarkerOptions = {};
+
+  /** Fields every shape has; subclasses add theirs with [...super.fields, ...]. */
+  static fields = [
+    {
+      name: "arcType",
+      label: "Arc type",
+      type: "enum",
+      options: ["GEODESIC", "RHUMB"],
+      get: (s) => (s.arcType === ArcType.RHUMB ? "RHUMB" : "GEODESIC"),
+      set: (s, v) => s.setArcType(v === "RHUMB" ? ArcType.RHUMB : ArcType.GEODESIC),
+    },
+    {
+      name: "clampToGround",
+      label: "Clamp to ground",
+      type: "boolean",
+      get: (s) => s.clampToGround,
+      set: (s, v) => s.setClampToGround(v),
+    },
+    {
+      name: "height",
+      label: "Height",
+      type: "distance",
+      min: 0,
+      get: (s) => s.height,
+      set: (s, v) => s.setHeight(v),
+    },
+  ];
 
   /** Registers a subclass for {@link Shape.fromJSON}. */
   static register(ShapeClass) {
@@ -375,6 +412,49 @@ export default class Shape {
     return withHeight(position, this.pointHeight);
   }
 
+  // --- Fields (for forms) --------------------------------------------------------------------
+
+  /**
+   * This shape's field descriptions, with `min` / `max` resolved for it (e.g. a polygon needs
+   * 3 positions, a polyline 2). Descriptions without get / set functions are for display.
+   */
+  get fields() {
+    return this.constructor.fields.map((field) => ({
+      ...field,
+      min: typeof field.min === "function" ? field.min(this) : field.min,
+      max: typeof field.max === "function" ? field.max(this) : field.max,
+    }));
+  }
+
+  #field(name) {
+    const field = this.fields.find((f) => f.name === name);
+    if (!field) {
+      throw new Error(`${this.constructor.type} has no field "${name}".`);
+    }
+    return field;
+  }
+
+  /** A field's value in display units (degrees, meters); copies, safe to keep or modify. */
+  getField(name) {
+    return this.#field(name).get(this) ?? null;
+  }
+
+  /** { name: value } for every field. */
+  getFields() {
+    return Object.fromEntries(this.fields.map((f) => [f.name, f.get(this) ?? null]));
+  }
+
+  /**
+   * Validates a value in display units, applies it (rebuilding the shape on the next frame)
+   * and returns the value actually applied (after clamping). Throws with a readable message
+   * for values that can't be used, such as a latitude of 95° or too few vertices.
+   */
+  setField(name, value) {
+    const field = this.#field(name);
+    field.set(this, validateField(field, value));
+    return this.getField(name);
+  }
+
   /** Marks parts of the shape for rebuilding on the next frame (see {@link Dirty}). */
   invalidate(flags = Dirty.GEOMETRY) {
     this._dirty |= flags;
@@ -544,7 +624,30 @@ export default class Shape {
       this._markers.sync(this.markerSpecs());
     }
     this.editor.scene.requestRender();
-    this.changed.raiseEvent(this);
+    const change = {
+      fields: this.#changedFields(),
+      source: this._mode === ShapeMode.DRAW ? "draw" : this._interactive ? "drag" : "api",
+      interactive: this.interactive,
+    };
+    this.changed.raiseEvent(this, change);
+    this.editor.shapeChanged.raiseEvent(this, change);
+  }
+
+  // Field names whose value differs from the last flush (all of them the first time).
+  // Comparing snapshots catches every change (drawing, dragging, translating, setters,
+  // subclasses) without each code path having to report what it touched.
+  #changedFields() {
+    const snapshot = {};
+    const changed = [];
+    for (const field of this.constructor.fields) {
+      const value = JSON.stringify(field.get(this) ?? null);
+      snapshot[field.name] = value;
+      if (this._fieldSnapshot?.[field.name] !== value) {
+        changed.push(field.name);
+      }
+    }
+    this._fieldSnapshot = snapshot;
+    return changed;
   }
 
   /** Per-frame material updates; returns true while a material is still loading images. */
@@ -780,6 +883,77 @@ export default class Shape {
       ...this.stateToJSON(),
     };
   }
+}
+
+/**
+ * Checks and normalizes a field value in display units (see Shape.fields): numbers must be
+ * finite and are clamped to min / max, positions need -90..90 latitudes, and position lists
+ * need at least `min` entries. Throws an Error with a readable message otherwise.
+ */
+export function validateField(field, value) {
+  const label = field.label ?? field.name;
+  const number = (v, what = label) => {
+    const n = typeof v === "string" ? Number(v.trim()) : v;
+    if (typeof n !== "number" || !Number.isFinite(n) || (typeof v === "string" && v.trim() === "")) {
+      throw new Error(`${what} must be a number.`);
+    }
+    return n;
+  };
+  const position = (v, what = label) => {
+    if (!Array.isArray(v) || v.length < 2 || v.length > 3) {
+      throw new Error(`${what} must be [longitude, latitude] or [longitude, latitude, height].`);
+    }
+    const lon = number(v[0], `${what} longitude`);
+    const lat = number(v[1], `${what} latitude`);
+    const blank = v[2] === undefined || v[2] === null || (typeof v[2] === "string" && v[2].trim() === "");
+    const height = blank ? 0 : number(v[2], `${what} height`);
+    if (lat < -90 || lat > 90) {
+      throw new Error(`${what} latitude must be between -90 and 90.`);
+    }
+    return [CesiumMath.toDegrees(CesiumMath.negativePiToPi(CesiumMath.toRadians(lon))), lat, height];
+  };
+  switch (field.type) {
+    case "number":
+    case "distance":
+    case "angle": {
+      const n = number(value);
+      return Math.min(Math.max(n, field.min ?? -Infinity), field.max ?? Infinity);
+    }
+    case "boolean":
+      return Boolean(value);
+    case "enum":
+      if (!field.options.includes(value)) {
+        throw new Error(`${label} must be one of ${field.options.join(", ")}.`);
+      }
+      return value;
+    case "position":
+      return position(value);
+    case "positions": {
+      if (!Array.isArray(value)) {
+        throw new Error(`${label} must be a list of positions.`);
+      }
+      if (field.min !== undefined && value.length < field.min) {
+        throw new Error(`${label} needs at least ${field.min} entries.`);
+      }
+      if (field.max !== undefined && value.length > field.max) {
+        throw new Error(`${label} allows at most ${field.max} entries.`);
+      }
+      return value.map((v, i) => position(v, `${label} ${i + 1}`));
+    }
+    default:
+      return value;
+  }
+}
+
+/**
+ * A position as a field value: [lon°, lat°, height m], rounded to 1e-10° (~0.01 mm) and
+ * 0.1 mm so Cartesian round-trip noise (39.49999999999999, heights of 1e-9) doesn't show up
+ * in forms or count as a change.
+ */
+export function fieldPosition(position) {
+  const [lon, lat, height] = toDegrees(position);
+  const round = (v, step) => Math.round(v / step) * step;
+  return [+round(lon, 1e-10).toFixed(10), +round(lat, 1e-10).toFixed(10), +round(height, 1e-4).toFixed(4) || 0];
 }
 
 /** [lon°, lat°, height] of a position. */

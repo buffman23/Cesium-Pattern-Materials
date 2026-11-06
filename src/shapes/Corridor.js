@@ -28,6 +28,26 @@ export default class Corridor extends VertexShape {
   static minVertices = 2;
   static singleHeight = true;
 
+  static fields = [
+    ...super.fields,
+    {
+      name: "width",
+      label: "Width",
+      type: "distance",
+      min: 1,
+      get: (s) => s.width,
+      set: (s, v) => s.setWidth(v),
+    },
+    {
+      name: "cornerType",
+      label: "Corners",
+      type: "enum",
+      options: ["ROUNDED", "MITERED", "BEVELED"],
+      get: (s) => CORNER_NAMES[s.cornerType],
+      set: (s, v) => s.setCornerType(CornerType[v]),
+    },
+  ];
+
   /**
    * @param {object} [options] VertexShape options, plus:
    * @param {number} [options.width=1000] Meters.

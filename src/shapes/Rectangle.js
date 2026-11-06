@@ -1,5 +1,5 @@
 import { Cartesian3, Cartographic, Math as CesiumMath } from "cesium";
-import Shape, { Dirty, fromDegrees, toDegrees } from "./Shape.js";
+import Shape, { Dirty, fieldPosition, fromDegrees, toDegrees } from "./Shape.js";
 import ShapeMode from "./ShapeMode.js";
 import { toCartographic } from "./geodesy.js";
 
@@ -16,6 +16,24 @@ const MAX_LATITUDE = CesiumMath.toRadians(89.9);
  */
 export default class Rectangle extends Shape {
   static type = "Rectangle";
+
+  static fields = [
+    ...super.fields,
+    {
+      name: "cornerA",
+      label: "Corner A",
+      type: "position",
+      get: (s) => s.cornerA && fieldPosition(s.cornerA),
+      set: (s, v) => s.setCornerA(fromDegrees(v)),
+    },
+    {
+      name: "cornerB",
+      label: "Corner B",
+      type: "position",
+      get: (s) => s.cornerB && fieldPosition(s.cornerB),
+      set: (s, v) => s.setCornerB(fromDegrees(v)),
+    },
+  ];
 
   /**
    * @param {object} [options] Shape options, plus:
@@ -45,6 +63,18 @@ export default class Rectangle extends Shape {
   setCorners(cornerA, cornerB) {
     this.cornerA = Cartesian3.clone(cornerA);
     this.cornerB = Cartesian3.clone(cornerB);
+    this.invalidate(Dirty.GEOMETRY);
+  }
+
+  setCornerA(corner) {
+    this.cornerA = Cartesian3.clone(corner);
+    this.cornerB ??= Cartesian3.clone(corner);
+    this.invalidate(Dirty.GEOMETRY);
+  }
+
+  setCornerB(corner) {
+    this.cornerB = Cartesian3.clone(corner);
+    this.cornerA ??= Cartesian3.clone(corner);
     this.invalidate(Dirty.GEOMETRY);
   }
 
