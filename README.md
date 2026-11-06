@@ -114,7 +114,7 @@ editor.selected?.toJSON();                                 // Shape.fromJSON(jso
   shows what it does:
   - Point handles are white squares.
   - Circle and Corridor resize handles are cyan double arrows that point the way they resize.
-  - Box handles are squares: orange for the width, white for the ends (anchors, or the
+  - Box handles are squares: yellow for the width, white for the ends (anchors, or the
     center form's rotate-and-lengthen ends).
   - Sector handles are all white squares.
   - The `roleStyles` marker option changes any of these per role, per shape class

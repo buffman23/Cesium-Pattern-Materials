@@ -1,7 +1,7 @@
 import { Cartesian3, Math as CesiumMath } from "cesium";
 import Shape, { Dirty, fieldPosition, fromDegrees, toDegrees } from "./Shape.js";
 import ShapeMode from "./ShapeMode.js";
-import { ROTATE_COLOR, coloredMarkerImage } from "./Markers.js";
+import { coloredMarkerImage } from "./Markers.js";
 import {
   arrivalBearing,
   bearing,
@@ -13,6 +13,7 @@ import {
 } from "./geodesy.js";
 
 const HALF_PI = CesiumMath.PI_OVER_TWO;
+const WIDTH_COLOR = "#ffeb3b"; // yellow width markers
 
 /** The two ways a Box can be defined (see Box). */
 export const BoxForm = Object.freeze({ ANCHORS: "anchors", CENTER: "center" });
@@ -34,11 +35,11 @@ export const BoxForm = Object.freeze({ ANCHORS: "anchors", CENTER: "center" });
 export default class Box extends Shape {
   static type = "Box";
 
-  // Square markers: orange ones change the width; the ends (anchors, or the center form's
+  // Square markers: yellow ones change the width; the ends (anchors, or the center form's
   // rotate-and-lengthen ends) are white.
   static defaultMarkerOptions = {
     roleStyles: {
-      width: { image: coloredMarkerImage(ROTATE_COLOR), width: 12, height: 12, align: false },
+      width: { image: coloredMarkerImage(WIDTH_COLOR), width: 12, height: 12, align: false },
       end: null,
     },
   };
