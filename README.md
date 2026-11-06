@@ -85,7 +85,7 @@ assumed to be the ellipsoid (no terrain); stamps taller than the line width are 
 
 A separate demo at **`/shapes.html`** (`src/shapesDemo.js`) shows a reusable drawing and
 editing library. It has a `Shape` base class and these subclasses: `Polyline`, `Polygon`,
-`Corridor` (all three extend `VertexShape`), `Circle`, `Rectangle` and `Sector`.
+`Corridor` (all three extend `VertexShape`), `Circle`, `Rectangle`, `Sector` and `Box`.
 
 ```js
 import { ShapeEditor, Polygon, Circle, patternFillMaterial } from "./src/shapes/index.js";
@@ -101,6 +101,10 @@ editor.startDrawing(Polygon, {
 editor.selected?.toJSON();                                 // Shape.fromJSON(json) restores it
 ```
 
+- **Box:** a rotatable box with two forms on one geometry. The anchor form takes `anchor1`,
+  `anchor2` (the middles of the short ends) and `width`. The center form takes `center`,
+  `length`, `width` and `heading`. Each form has its own drawing steps, markers and fields,
+  and `setForm` switches between them without moving the box.
 - **Modes:** a shape starts in DRAW_MODE. When it is finished it enters EDIT_MODE, where
   markers can be dragged. Clicking empty globe or pressing Esc makes it IDLE, and clicking it
   edits it again.

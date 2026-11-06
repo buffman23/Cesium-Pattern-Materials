@@ -17,6 +17,7 @@
         <button data-shape="Circle">Circle</button>
         <button data-shape="Rectangle">Rectangle</button>
         <button data-shape="Sector">Sector</button>
+        <button data-shape="Box">Box</button>
       </div>
       <div class="buttons">
         <button id="btnDelete">Delete selected</button>
@@ -67,6 +68,15 @@
         <div>
           <label for="corridorWidth">Corridor width (m)</label>
           <input id="corridorWidth" type="number" min="1" step="100" value="2000" />
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label for="boxForm">Box defined by</label>
+          <select id="boxForm">
+            <option value="anchors" selected>Anchors + width</option>
+            <option value="center">Center, length, width, heading</option>
+          </select>
         </div>
       </div>
       <div class="checks">

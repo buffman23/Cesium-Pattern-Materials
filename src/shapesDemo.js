@@ -15,6 +15,7 @@ import {
   Polyline,
   Rectangle,
   Sector,
+  Box,
   Shape,
   ShapeEditor,
   colorMaterial,
@@ -56,7 +57,7 @@ const viewer = new Viewer("cesiumContainer", {
 viewer.scene.globe.depthTestAgainstTerrain = false;
 viewer.camera.setView({ destination: Cartesian3.fromDegrees(-104.99, 39.74, 400000) });
 
-const SHAPES = { Polyline, Polygon, Corridor, Circle, Rectangle, Sector };
+const SHAPES = { Polyline, Polygon, Corridor, Circle, Rectangle, Sector, Box };
 
 // --- Materials, by select value (shared specs, so changing one shape doesn't affect others) --
 const COLORS = {
@@ -139,6 +140,7 @@ const controls = {
   translatable: $("translatable"),
   groundLine: $("groundLine"),
   cursorMessages: $("cursorMessages"),
+  boxForm: $("boxForm"),
 };
 
 const arcType = () => (controls.arcType.value === "RHUMB" ? ArcType.RHUMB : ArcType.GEODESIC);
@@ -165,6 +167,7 @@ function shapeOptions() {
     markers: markerOptions(),
     width: Number(controls.corridorWidth.value) || 1000,
     cursorMessages: controls.cursorMessages.checked,
+    form: controls.boxForm.value, // Box only
   };
 }
 
@@ -201,6 +204,9 @@ editor.selectionChanged.addEventListener((shape) => {
   controls.translatable.checked = shape.markerOptions.translatable;
   controls.groundLine.checked = shape.markerOptions.groundLine;
   controls.cursorMessages.checked = shape.cursorMessages !== false;
+  if (shape instanceof Box) {
+    controls.boxForm.value = shape.form;
+  }
   if (shape instanceof Corridor) {
     controls.corridorWidth.value = String(Math.round(shape.width));
   }
@@ -275,6 +281,10 @@ controls.clampToGround.addEventListener(
     }
     s.setClampToGround(controls.clampToGround.checked);
   }),
+);
+controls.boxForm.addEventListener(
+  "change",
+  onSelected((s) => s instanceof Box && s.setForm(controls.boxForm.value)),
 );
 controls.cursorMessages.addEventListener(
   "change",
@@ -449,8 +459,11 @@ editor.selectionChanged.addEventListener(() => showForm(formTarget()));
 editor.shapeRemoved.addEventListener(() => showForm(formTarget()));
 editor.shapeChanged.addEventListener((shape, change) => {
   const target = formTarget();
-  if (target !== formShape) {
-    showForm(target); // e.g. drawing just started
+  // A different shape (e.g. drawing just started), or the same shape with a different set of
+  // fields (e.g. a Box switched form): rebuild the form.
+  const names = target?.fields.map((f) => f.name).join() ?? "";
+  if (target !== formShape || names !== [...formRows.keys()].join()) {
+    showForm(target);
     return;
   }
   if (shape !== formShape) {

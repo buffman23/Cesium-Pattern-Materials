@@ -78,7 +78,9 @@ let nextId = 1;
  *  - static fields: the fields a form can show and edit (see below)
  *
  * Forms and binding: `static fields` describes each editable field as
- *   { name, label, type, min?, max?, options?, get(shape), set(shape, value) }
+ *   { name, label, type, min?, max?, options?, show?(shape), get(shape), set(shape, value) }
+ * (`min` / `max` may be functions of the shape; `show` hides a field for some instances, e.g.
+ * per Box form)
  * with types "position" ([lon°, lat°, height m]), "positions" (an array of those), "distance"
  * (meters), "angle" (degrees), "number", "boolean" and "enum" (one of `options`). Read and
  * write them with getField / setField / getFields, which convert units, validate and
@@ -419,11 +421,13 @@ export default class Shape {
    * 3 positions, a polyline 2). Descriptions without get / set functions are for display.
    */
   get fields() {
-    return this.constructor.fields.map((field) => ({
-      ...field,
-      min: typeof field.min === "function" ? field.min(this) : field.min,
-      max: typeof field.max === "function" ? field.max(this) : field.max,
-    }));
+    return this.constructor.fields
+      .filter((field) => !field.show || field.show(this))
+      .map((field) => ({
+        ...field,
+        min: typeof field.min === "function" ? field.min(this) : field.min,
+        max: typeof field.max === "function" ? field.max(this) : field.max,
+      }));
   }
 
   #field(name) {
@@ -639,7 +643,7 @@ export default class Shape {
   #changedFields() {
     const snapshot = {};
     const changed = [];
-    for (const field of this.constructor.fields) {
+    for (const field of this.fields) {
       const value = JSON.stringify(field.get(this) ?? null);
       snapshot[field.name] = value;
       if (this._fieldSnapshot?.[field.name] !== value) {
