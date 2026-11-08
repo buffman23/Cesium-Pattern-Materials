@@ -208,6 +208,19 @@ export default class ShapeEditor {
     this.scene.primitives.remove(this.billboards);
   }
 
+  /** Meters per CSS pixel at a world position (Cartesian3), at its distance from the camera. */
+  metersPerPixelAt(position) {
+    const scene = this.scene;
+    return (
+      scene.camera.getPixelSize(
+        new BoundingSphere(position, 0),
+        scene.drawingBufferWidth,
+        scene.drawingBufferHeight,
+      ) *
+      (scene.drawingBufferHeight / Math.max(scene.canvas.clientHeight, 1))
+    );
+  }
+
   // Called by shapes.
   _requestFlush(shape) {
     if (shape.editor === this) {
@@ -612,15 +625,7 @@ export default class ShapeEditor {
     if (vertical && !shape.clampToGround) {
       // Pixels up -> meters up, at the marker's distance from the camera.
       const pixels = e.startPosition.y - e.endPosition.y;
-      const scene = this.scene;
-      const metersPerPixel =
-        scene.camera.getPixelSize(
-          new BoundingSphere(spec.position, 0),
-          scene.drawingBufferWidth,
-          scene.drawingBufferHeight,
-        ) *
-        (scene.drawingBufferHeight / Math.max(scene.canvas.clientHeight, 1));
-      drag.height = Math.max(drag.height + pixels * metersPerPixel, 0);
+      drag.height = Math.max(drag.height + pixels * this.metersPerPixelAt(spec.position), 0);
       shape.onMarkerHeight(spec, drag.height, modifiers);
       return;
     }

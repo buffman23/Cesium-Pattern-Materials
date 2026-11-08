@@ -20,6 +20,7 @@ export const AltitudeMode = Object.freeze({ SLOPE: "slope", STEP: "step" });
 const HALF_PI = Math.PI / 2;
 const TOP_OFFSET = new Cartesian2(0, -7); // keeps the top and bottom markers apart from above
 const BOTTOM_OFFSET = new Cartesian2(0, 7);
+const AUTO_RADIUS_PIXELS = 40; // on-screen radius of the first cylinder when none is given
 
 /**
  * A chain of cylinders: every vertex has its own radius (meters, geodesic) and min / max
@@ -91,7 +92,8 @@ export default class Corridor extends VertexShape {
    * @param {object} [options] VertexShape options, plus:
    * @param {object[]} [options.vertices] [{ lon, lat, radius, minAltitude, maxAltitude }]
    *   (degrees, meters); takes precedence over `positions`.
-   * @param {number} [options.radius=1000] Meters, for vertices without their own.
+   * @param {number} [options.radius] Meters, for vertices without their own. Omitted: sized
+   *   from the zoom at the first draw click (about 40 px on screen), else 1000.
    * @param {number} [options.minAltitude=0] Meters.
    * @param {number} [options.maxAltitude=3000] Meters.
    * @param {string} [options.altitudeMode=AltitudeMode.SLOPE]
@@ -105,6 +107,7 @@ export default class Corridor extends VertexShape {
       minAltitude,
       maxAltitude: Math.max(options.maxAltitude ?? 3000, minAltitude),
     };
+    this._autoRadius = options.radius === undefined && options.width === undefined;
     this.altitudeMode = options.altitudeMode === AltitudeMode.STEP ? AltitudeMode.STEP : AltitudeMode.SLOPE;
     this.radii = [];
     this.minAltitudes = [];
@@ -225,7 +228,15 @@ export default class Corridor extends VertexShape {
   }
 
   onDrawClick(position) {
-    const result = super.onDrawClick(withHeight(position, 0));
+    const ground = withHeight(position, 0);
+    if (this._autoRadius && this.radii.length === 0 && this.editor) {
+      const metersPerPixel = this.editor.metersPerPixelAt(ground);
+      if (metersPerPixel > 0) {
+        this.vertexDefaults.radius = Math.max(Math.round(AUTO_RADIUS_PIXELS * metersPerPixel), 1);
+      }
+      this._autoRadius = false;
+    }
+    const result = super.onDrawClick(ground);
     this.#syncArrays();
     return result;
   }

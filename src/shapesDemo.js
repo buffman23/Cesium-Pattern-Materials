@@ -169,7 +169,8 @@ function shapeOptions() {
     // "deletable" only affects shapes with vertex markers (Polyline, Polygon, Corridor).
     markers: markerOptions(),
     // Corridor only: the first vertex's cylinder (later vertices copy the previous one).
-    radius: Number(controls.corridorRadius.value) || 1000,
+    // An empty radius sizes it from the zoom at the first click.
+    radius: Number(controls.corridorRadius.value) || undefined,
     minAltitude: Number(controls.corridorMinAltitude.value) || 0,
     maxAltitude: Number(controls.corridorMaxAltitude.value) || 0,
     altitudeMode: controls.corridorAltitudeMode.value,
