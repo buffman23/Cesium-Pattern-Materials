@@ -20,6 +20,10 @@ import ShapeMode from "./ShapeMode.js";
 // Clicks closer than this (pixels) to the previous one are ignored while drawing; this
 // swallows the second click of a double-click.
 const DUPLICATE_CLICK_PIXELS = 4;
+// Double-click on an edge: how near the cursor must be (pixels), and how long a click that
+// missed the edge (and deselected the shape) still counts as its first click.
+const EDGE_PICK_PIXELS = 8;
+const DOUBLE_CLICK_MS = 600;
 
 /**
  * Owns everything shapes share: mouse input, the selected (edited) shape, the marker
@@ -164,6 +168,7 @@ export default class ShapeEditor {
     shape._setMode(ShapeMode.EDIT);
     this.#emitHint(
       "Drag the markers to edit (shift+drag changes height at altitude). " +
+        (shape.constructor.insertOnDoubleClick ? "Double-click an edge to add a vertex. " : "") +
         "Click elsewhere or press Esc to stop editing.",
     );
     this._updateCursorMessage();
@@ -332,7 +337,7 @@ export default class ShapeEditor {
     this.handler = new ScreenSpaceEventHandler(this.scene.canvas);
     const actions = {
       [ScreenSpaceEventType.LEFT_CLICK]: (e) => this.#onLeftClick(e),
-      [ScreenSpaceEventType.LEFT_DOUBLE_CLICK]: () => this.drawing?.onDrawFinishRequest("double"),
+      [ScreenSpaceEventType.LEFT_DOUBLE_CLICK]: (e) => this.#onDoubleClick(e),
       [ScreenSpaceEventType.RIGHT_CLICK]: () => this.drawing?.onDrawFinishRequest("right"),
       [ScreenSpaceEventType.MOUSE_MOVE]: (e) => this.#onMouseMove(e),
       [ScreenSpaceEventType.LEFT_DOWN]: (e) => this.#onLeftDown(e),
@@ -467,6 +472,9 @@ export default class ShapeEditor {
     }
     const id = this.#pickedId(e.position);
     if (!id) {
+      // A thin line is easy to miss by a pixel: remember what this click deselected, so a
+      // double-click on its edge (whose first click lands here) still inserts a vertex.
+      this._lastDeselected = this.selected && { shape: this.selected, time: performance.now() };
       this.deselect();
       return;
     }
@@ -483,6 +491,40 @@ export default class ShapeEditor {
       return;
     }
     this.select(id.shape);
+  }
+
+  // Drawing: finishes the shape. Otherwise, on a Polyline / Polygon edge (insertOnDoubleClick):
+  // inserts a vertex there, splitting that edge.
+  #onDoubleClick(e) {
+    if (this.drawing) {
+      this.drawing.onDrawFinishRequest("double");
+      return;
+    }
+    const id = this.#pickedId(e.position);
+    if (id?.kind === "marker" || id?.kind === "delete") {
+      return; // on a handle, not an edge
+    }
+    const recent = this._lastDeselected;
+    this._lastDeselected = undefined;
+    const candidates = [
+      this.selected,
+      id?.shape,
+      recent && performance.now() - recent.time < DOUBLE_CLICK_MS ? recent.shape : undefined,
+    ];
+    for (const shape of candidates) {
+      if (!shape?.constructor.insertOnDoubleClick || shape.editor !== this) {
+        continue;
+      }
+      const hit = shape.vertexInsertAt(this.scene, e.position, EDGE_PICK_PIXELS);
+      if (!hit) {
+        continue;
+      }
+      this.select(shape);
+      shape.insertVertex(hit.index, hit.position);
+      shape.markers?.setSelected(`v${hit.index}`); // shows its delete X
+      this.scene.requestRender();
+      return;
+    }
   }
 
   #onLeftDown(e) {

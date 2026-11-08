@@ -4,6 +4,8 @@ import VertexShape from "./VertexShape.js";
 /** Closed area through its vertices; edges follow the shape's arcType. */
 export default class Polygon extends VertexShape {
   static type = "Polygon";
+  static insertOnDoubleClick = true;
+  static closed = true;
   static minVertices = 3;
 
   createFillGeometry() {

@@ -1,7 +1,10 @@
-import { Cartesian3 } from "cesium";
+import { Cartesian2, Cartesian3 } from "cesium";
 import Shape, { Dirty, fieldPosition, fromDegrees, toDegrees } from "./Shape.js";
 import ShapeMode from "./ShapeMode.js";
-import { heightOf, withHeight } from "./geodesy.js";
+import { heightOf, interpolate, withHeight } from "./geodesy.js";
+
+// Samples per edge when measuring how close the cursor is to it (edges are curves).
+const EDGE_SAMPLES = 24;
 
 /**
  * Base for shapes defined by a list of vertices (Polyline, Polygon, Corridor, …): click to
@@ -11,11 +14,15 @@ import { heightOf, withHeight } from "./geodesy.js";
  * Subclasses set `static minVertices` and implement outlineLines / createFillGeometry using
  * {@link VertexShape#drawPositions} (the vertices plus the floating one under the cursor while
  * drawing). With `static singleHeight = true` the shape has one height (shape.height) at
- * altitude; otherwise each vertex keeps its own.
+ * altitude; otherwise each vertex keeps its own. With `static insertOnDoubleClick = true`,
+ * double-clicking an edge in the editor inserts a vertex there ({@link VertexShape#vertexInsertAt});
+ * `static closed = true` includes the closing edge (last vertex back to the first).
  */
 export default class VertexShape extends Shape {
   static minVertices = 2;
   static singleHeight = false;
+  static insertOnDoubleClick = false;
+  static closed = false;
   static defaultMarkerOptions = { deletable: true };
 
   static fields = [
@@ -214,9 +221,64 @@ export default class VertexShape extends Shape {
     return spec.role === "vertex" && this.removeVertex(spec.index);
   }
 
+  /**
+   * Where a vertex would go for a click at `windowPosition`: the edge nearest the cursor on
+   * screen (within `tolerancePixels`), as { index, position } - insert `position` before
+   * `index` to split that edge. The position lies on the edge (heights interpolated).
+   * undefined when no edge is close enough.
+   */
+  vertexInsertAt(scene, windowPosition, tolerancePixels = 8) {
+    const stored = this.positions;
+    const n = stored.length;
+    const edges = this.constructor.closed && n >= 3 ? n : n - 1;
+    let best;
+    let bestDistance = tolerancePixels;
+    for (let i = 0; i < edges; i++) {
+      const j = (i + 1) % n;
+      const a = this.#display(stored[i]);
+      const b = this.#display(stored[j]);
+      let previous;
+      for (let k = 0; k <= EDGE_SAMPLES; k++) {
+        const t = k / EDGE_SAMPLES;
+        // Undefined behind the camera; that piece of the edge is skipped.
+        const screen = scene.cartesianToCanvasCoordinates(interpolate(a, b, t, this.arcType));
+        if (screen && previous) {
+          const { distance, fraction } = toSegment(windowPosition, previous.screen, screen);
+          if (distance <= bestDistance) {
+            bestDistance = distance;
+            best = { edge: i, t: previous.t + (t - previous.t) * fraction };
+          }
+        }
+        previous = screen ? { screen, t } : undefined;
+      }
+    }
+    if (!best) {
+      return undefined;
+    }
+    const next = (best.edge + 1) % n;
+    return {
+      index: best.edge + 1,
+      position: interpolate(stored[best.edge], stored[next], best.t, this.arcType),
+    };
+  }
+
   /** Inserts a vertex before `index` (e.g. for custom insert markers). */
   insertVertex(index, position) {
     this.positions.splice(index, 0, Cartesian3.clone(position));
     this.invalidate(Dirty.GEOMETRY);
   }
+}
+
+// Screen distance from p to the segment a-b, and how far along it (0..1) the nearest point is.
+const scratch = new Cartesian2();
+function toSegment(p, a, b) {
+  const ab = Cartesian2.subtract(b, a, scratch);
+  const lengthSquared = Cartesian2.magnitudeSquared(ab);
+  const fraction =
+    lengthSquared > 0
+      ? Math.min(Math.max(((p.x - a.x) * ab.x + (p.y - a.y) * ab.y) / lengthSquared, 0), 1)
+      : 0;
+  const dx = a.x + ab.x * fraction - p.x;
+  const dy = a.y + ab.y * fraction - p.y;
+  return { distance: Math.hypot(dx, dy), fraction };
 }

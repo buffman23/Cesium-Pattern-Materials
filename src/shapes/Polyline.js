@@ -5,6 +5,7 @@ import VertexShape from "./VertexShape.js";
 export default class Polyline extends VertexShape {
   static type = "Polyline";
   static hasFill = false;
+  static insertOnDoubleClick = true;
   static minVertices = 2;
 
   outlineLines() {
