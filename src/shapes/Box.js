@@ -381,7 +381,8 @@ export default class Box extends Shape {
       return specs;
     }
     // The same end markers in both forms: drag one end (the other stays put), or with shift
-    // rotate about the center. shiftVertical: false - shift doesn't make it a height drag.
+    // rotate about the center. shiftVertical: false - shift doesn't make it a height drag;
+    // shiftRole: "end" - while shift is held they show the rotate icon.
     const numbered = this.markerOptions.numbered;
     const specs = [a1, a2].map((position, index) => ({
       key: `anchor${index + 1}`,
@@ -390,6 +391,7 @@ export default class Box extends Shape {
       index,
       label: numbered ? index + 1 : undefined,
       shiftVertical: false,
+      shiftRole: "end",
     }));
     const half = this.width / 2;
     if (this.length > 0) {

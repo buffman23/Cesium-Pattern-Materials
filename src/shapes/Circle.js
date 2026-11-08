@@ -15,6 +15,9 @@ const RADIUS_BEARINGS = [0, 90, 180, 270].map(CesiumMath.toRadians);
 export default class Circle extends Shape {
   static type = "Circle";
 
+  // Plain white square radius markers (no resize icons).
+  static defaultMarkerOptions = { roleStyles: { radius: null } };
+
   // No arcType: a circle is defined by distance alone.
   static fields = [
     ...super.fields.filter((f) => f.name !== "arcType"),

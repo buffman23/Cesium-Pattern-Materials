@@ -346,7 +346,7 @@ export default class ShapeEditor {
     }
     this._onKeyDown = (e) => {
       if (e.key === "Shift") {
-        this._shift = true;
+        this.#setShift(true);
       } else if (e.key === "Escape") {
         if (this.drawing) {
           this.drawing.cancelDrawing();
@@ -357,11 +357,11 @@ export default class ShapeEditor {
     };
     this._onKeyUp = (e) => {
       if (e.key === "Shift") {
-        this._shift = false;
+        this.#setShift(false);
       }
     };
     this._onBlur = () => {
-      this._shift = false;
+      this.#setShift(false);
     };
     window.addEventListener("keydown", this._onKeyDown);
     window.addEventListener("keyup", this._onKeyUp);
@@ -380,6 +380,22 @@ export default class ShapeEditor {
 
   #emitHint(text) {
     this.hint.raiseEvent(text);
+  }
+
+  /** Whether shift is held (markers can look different then, see spec.shiftRole). */
+  get shift() {
+    return this._shift;
+  }
+
+  // Shift changed: restyle the edited shape's markers (a held key repeats keydown, so only
+  // on an actual change).
+  #setShift(shift) {
+    if (shift === this._shift) {
+      return;
+    }
+    this._shift = shift;
+    this.selected?.markers?.restyleAll();
+    this.scene.requestRender();
   }
 
   #setCursor(cursor) {

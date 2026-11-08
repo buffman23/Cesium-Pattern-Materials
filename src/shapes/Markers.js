@@ -30,7 +30,7 @@ import { withHeight } from "./geodesy.js";
  *  - groundLine:     at altitude, draws a line from each marker straight down to the ground.
  *  - roleStyles:     looks per marker role, merged per role over DEFAULT_ROLE_STYLES: resize
  *                    handles (width, radius) are cyan double arrows that point along the
- *                    resize direction, rotate handles (end, start) white circular arrows;
+ *                    resize direction, rotate handles (end, start, rotate) white circular arrows;
  *                    other roles use `image`. E.g. { width: { image: url } }; null removes
  *                    one.
  */
@@ -181,6 +181,8 @@ export const DEFAULT_ROLE_STYLES = Object.freeze({
   radius: Object.freeze({ image: RESIZE_SVG, width: 22, height: 22, align: true }),
   end: Object.freeze({ image: ROTATE_SVG, width: 22, height: 22 }),
   start: Object.freeze({ image: ROTATE_SVG, width: 22, height: 22 }),
+  // A plain rotate look, e.g. for a marker's shiftRole when shift+drag rotates.
+  rotate: Object.freeze({ image: ROTATE_SVG, width: 22, height: 22 }),
   // Vertical handles (e.g. a corridor cylinder's min / max altitude): the resize arrow, upright.
   altitude: Object.freeze({ image: RESIZE_SVG, width: 22, height: 22, align: true }),
 });
@@ -237,7 +239,8 @@ export function numberedPinImage(text, color, size) {
  *   { key, position, role, deletable?, label?, index?, ...subclass data }
  * role: "vertex" | "translate" | anything a subclass handles in onMarkerDrag.
  * Optional: axis (bearing a resize icon points along), axisUp (point it vertically instead),
- * pixelOffset (Cartesian2), vertical (drags change height, see ShapeEditor).
+ * pixelOffset (Cartesian2), vertical (drags change height, see ShapeEditor), shiftRole (the
+ * role whose look the marker takes while shift is held).
  *
  * Billboard ids are { shape, key, kind: "marker" | "delete" } so the editor can route picks.
  */
@@ -390,7 +393,10 @@ export class MarkerSet {
     let width;
     let height;
     let verticalOrigin = VerticalOrigin.CENTER;
-    const roleStyle = spec.role === "translate" ? undefined : o.roleStyles?.[spec.role];
+    // While shift is held, a marker can look like another role (spec.shiftRole), e.g. a Box
+    // end shows the rotate icon because shift+drag rotates.
+    const lookRole = this.editor.shift && spec.shiftRole ? spec.shiftRole : spec.role;
+    const roleStyle = spec.role === "translate" ? undefined : o.roleStyles?.[lookRole];
     if (spec.role === "translate") {
       image = o.translateImage ?? defaultTranslateImage();
       width = 22;

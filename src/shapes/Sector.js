@@ -9,13 +9,15 @@ import { arrivalBearing, bearing, clockwiseSweep, distance, sampleArc } from "./
  * The radial edges and the arc's distance follow the shape's arcType. Drawn by clicking the
  * center, then the start of the arc, then its end.
  *
- * Edit markers: the center (moves the sector), the arc's start and end (bearing and radius)
- * and its middle (radius only). One height for the whole sector at altitude.
+ * Edit markers: the center (moves the sector; shift+drag changes the height at altitude), the
+ * arc's start and end (bearing and radius) and its middle (radius; shift+drag rotates the
+ * sector about the center instead). One height for the whole sector at altitude.
  */
 export default class Sector extends Shape {
   static type = "Sector";
 
-  // Plain white square markers for every handle (no resize / rotate icons).
+  // Plain white square markers for every handle (no resize / rotate icons), except the
+  // radius marker's rotate icon while shift is held.
   static defaultMarkerOptions = { roleStyles: { radius: null, start: null, end: null } };
 
   static fields = [
@@ -237,13 +239,17 @@ export default class Sector extends Shape {
       ? this.translateSpec(center)
       : [{ key: "center", position: center, role: "center" }];
     if (this.radius > 0) {
+      // shiftVertical: false - shift doesn't make these height drags. The radius marker
+      // rotates with shift instead, and shows the rotate icon then (shiftRole).
       specs.push(
-        { key: "start", position: this.#pointAt(this.startBearing), role: "start" },
-        { key: "end", position: this.#pointAt(this.startBearing + this.sweep), role: "end" },
+        { key: "start", position: this.#pointAt(this.startBearing), role: "start", shiftVertical: false },
+        { key: "end", position: this.#pointAt(this.startBearing + this.sweep), role: "end", shiftVertical: false },
         {
           key: "mid",
           position: this.#pointAt(this.startBearing + this.sweep / 2),
           role: "radius",
+          shiftVertical: false,
+          shiftRole: "rotate",
           // axis: outward at the marker (for the resize icon).
           axis: arrivalBearing(this.center, this.#pointAt(this.startBearing + this.sweep / 2), this.arcType),
         },
@@ -252,8 +258,15 @@ export default class Sector extends Shape {
     return specs;
   }
 
-  onMarkerDrag(spec, position) {
-    if (spec.role === "start") {
+  onMarkerDrag(spec, position, { shift = false } = {}) {
+    if (spec.role === "radius" && shift) {
+      // Rotate about the center: the arc's middle follows the cursor, sweep and radius kept.
+      const sweep = this.sweep;
+      const mid = bearing(this.center, position, this.arcType);
+      this.startBearing = mid - sweep / 2;
+      this.endBearing = mid + sweep / 2;
+      this.invalidate(Dirty.GEOMETRY);
+    } else if (spec.role === "start") {
       this.#aim(position, "startBearing");
     } else if (spec.role === "end") {
       this.#aim(position, "endBearing");
