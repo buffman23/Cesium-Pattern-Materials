@@ -38,13 +38,17 @@ const AUTO_RADIUS_PIXELS = 40; // on-screen radius of the first cylinder when no
  * yellow radius square on its circle and, at altitude, orange top and bottom squares dragged
  * up / down for the max and min altitude. With shift, a radius square scales every radius by
  * the same factor, and an altitude square moves every max (or min) altitude by the same
- * number of meters. New vertices copy
- * the previous vertex's radius and altitudes.
+ * number of meters. Vertices added while drawing copy the previous vertex's radius and
+ * altitudes. Double-clicking the corridor (in the editor) inserts a vertex on the centerline
+ * of the nearest leg, with the radius and altitudes the leg has there, so the shape doesn't
+ * change.
  */
 export default class Corridor extends VertexShape {
   static type = "Corridor";
   static minVertices = 2;
   static singleHeight = true;
+  static insertOnDoubleClick = true;
+  static insertHint = "Double-click the corridor to add a vertex. ";
 
   static defaultMarkerOptions = {
     ...VertexShape.defaultMarkerOptions,
@@ -273,15 +277,57 @@ export default class Corridor extends VertexShape {
     return removed;
   }
 
+  /**
+   * Inserts a vertex before `index`. Between two vertices it takes the leg's values at that
+   * point (radius and, in SLOPE mode, altitudes interpolated by distance; in STEP mode the
+   * lower floor and higher ceiling, as the leg has), so the corridor keeps its shape. At
+   * either end it copies the nearest vertex.
+   */
   insertVertex(index, position) {
-    const from = Math.max(Math.min(index - 1, this.positions.length - 1), 0);
-    super.insertVertex(index, withHeight(position, 0));
+    const ground = withHeight(position, 0);
+    const p = this.positions;
+    const n = p.length;
+    if (index > 0 && index < n && this.radii.length === n) {
+      const before = index - 1;
+      const toBefore = distance(p[before], ground, this.arcType);
+      const toAfter = distance(ground, p[index], this.arcType);
+      const t = toBefore + toAfter > 0 ? toBefore / (toBefore + toAfter) : 0.5;
+      const lerp = (values) => values[before] + (values[index] - values[before]) * t;
+      const step = this.altitudeMode === AltitudeMode.STEP;
+      const min = step ? Math.min(this.minAltitudes[before], this.minAltitudes[index]) : lerp(this.minAltitudes);
+      const max = step ? Math.max(this.maxAltitudes[before], this.maxAltitudes[index]) : lerp(this.maxAltitudes);
+      super.insertVertex(index, ground);
+      this.radii.splice(index, 0, Math.max(lerp(this.radii), 1));
+      this.minAltitudes.splice(index, 0, min);
+      this.maxAltitudes.splice(index, 0, Math.max(max, min));
+      return;
+    }
+    const from = Math.max(Math.min(index - 1, n - 1), 0);
+    super.insertVertex(index, ground);
     if (this.radii.length > 0) {
       this.radii.splice(index, 0, this.radii[from]);
       this.minAltitudes.splice(index, 0, this.minAltitudes[from]);
       this.maxAltitudes.splice(index, 0, this.maxAltitudes[from]);
     }
     this.#syncArrays();
+  }
+
+  // Double-click insert (VertexShape#vertexInsertAt): measure from the centerline at the
+  // cylinders' mid heights, and count anywhere within the corridor's on-screen half-width
+  // (or half its height, seen from the side) as on that leg.
+  edgeDisplayPosition(index) {
+    return withHeight(this.positions[index], this.#midHeight(index));
+  }
+
+  edgeReachPixels(edge, t, point) {
+    const metersPerPixel = this.editor?.metersPerPixelAt(point);
+    if (!(metersPerPixel > 0)) {
+      return 0;
+    }
+    const lerp = (values) => values[edge] + (values[edge + 1] - values[edge]) * t;
+    const radius = lerp(this.radii);
+    const halfHeight = this.clampToGround ? 0 : (lerp(this.maxAltitudes) - lerp(this.minAltitudes)) / 2;
+    return Math.max(radius, halfHeight) / metersPerPixel;
   }
 
   // Vertices are positions on the ground; the cylinders give the altitudes.

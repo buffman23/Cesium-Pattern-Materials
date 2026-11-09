@@ -168,7 +168,9 @@ export default class ShapeEditor {
     shape._setMode(ShapeMode.EDIT);
     this.#emitHint(
       "Drag the markers to edit (shift+drag changes height at altitude). " +
-        (shape.constructor.insertOnDoubleClick ? "Double-click an edge to add a vertex. " : "") +
+        (shape.constructor.insertOnDoubleClick
+          ? (shape.constructor.insertHint ?? "Double-click an edge to add a vertex. ")
+          : "") +
         "Click elsewhere or press Esc to stop editing.",
     );
     this._updateCursorMessage();
@@ -506,7 +508,7 @@ export default class ShapeEditor {
     this.select(id.shape);
   }
 
-  // Drawing: finishes the shape. Otherwise, on a Polyline / Polygon edge (insertOnDoubleClick):
+  // Drawing: finishes the shape. Otherwise, on a Polyline / Polygon / Corridor edge (insertOnDoubleClick):
   // inserts a vertex there, splitting that edge.
   #onDoubleClick(e) {
     if (this.drawing) {

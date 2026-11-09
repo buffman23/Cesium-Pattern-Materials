@@ -17,6 +17,8 @@ const EDGE_SAMPLES = 24;
  * altitude; otherwise each vertex keeps its own. With `static insertOnDoubleClick = true`,
  * double-clicking an edge in the editor inserts a vertex there ({@link VertexShape#vertexInsertAt});
  * `static closed = true` includes the closing edge (last vertex back to the first).
+ * Subclasses whose edges aren't thin lines adjust the pick with edgeDisplayPosition /
+ * edgeReachPixels.
  */
 export default class VertexShape extends Shape {
   static minVertices = 2;
@@ -223,33 +225,33 @@ export default class VertexShape extends Shape {
 
   /**
    * Where a vertex would go for a click at `windowPosition`: the edge nearest the cursor on
-   * screen (within `tolerancePixels`), as { index, position } - insert `position` before
-   * `index` to split that edge. The position lies on the edge (heights interpolated).
-   * undefined when no edge is close enough.
+   * screen (within `tolerancePixels`, plus {@link VertexShape#edgeReachPixels}), as
+   * { index, position } - insert `position` before `index` to split that edge. The position
+   * lies on the edge (heights interpolated). undefined when no edge is close enough.
    */
   vertexInsertAt(scene, windowPosition, tolerancePixels = 8) {
     const stored = this.positions;
     const n = stored.length;
     const edges = this.constructor.closed && n >= 3 ? n : n - 1;
     let best;
-    let bestDistance = tolerancePixels;
     for (let i = 0; i < edges; i++) {
       const j = (i + 1) % n;
-      const a = this.#display(stored[i]);
-      const b = this.#display(stored[j]);
+      const a = this.edgeDisplayPosition(i);
+      const b = this.edgeDisplayPosition(j);
       let previous;
       for (let k = 0; k <= EDGE_SAMPLES; k++) {
         const t = k / EDGE_SAMPLES;
+        const point = interpolate(a, b, t, this.arcType);
         // Undefined behind the camera; that piece of the edge is skipped.
-        const screen = scene.cartesianToCanvasCoordinates(interpolate(a, b, t, this.arcType));
+        const screen = scene.cartesianToCanvasCoordinates(point);
+        const reach = screen ? tolerancePixels + this.edgeReachPixels(i, t, point) : 0;
         if (screen && previous) {
           const { distance, fraction } = toSegment(windowPosition, previous.screen, screen);
-          if (distance <= bestDistance) {
-            bestDistance = distance;
-            best = { edge: i, t: previous.t + (t - previous.t) * fraction };
+          if (distance <= Math.max(reach, previous.reach) && (!best || distance < best.distance)) {
+            best = { edge: i, t: previous.t + (t - previous.t) * fraction, distance };
           }
         }
-        previous = screen ? { screen, t } : undefined;
+        previous = screen ? { screen, t, reach } : undefined;
       }
     }
     if (!best) {
@@ -260,6 +262,19 @@ export default class VertexShape extends Shape {
       index: best.edge + 1,
       position: interpolate(stored[best.edge], stored[next], best.t, this.arcType),
     };
+  }
+
+  /** Where vertex `index` is drawn, for measuring screen distance to its edges. */
+  edgeDisplayPosition(index) {
+    return this.#display(this.positions[index]);
+  }
+
+  /**
+   * Extra pixels beyond the pick tolerance that still count as on the edge, at fraction `t`
+   * along edge `edge` (at `point`): 0 for a thin line; a Corridor's on-screen width.
+   */
+  edgeReachPixels() {
+    return 0;
   }
 
   /** Inserts a vertex before `index` (e.g. for custom insert markers). */
