@@ -26,7 +26,7 @@ const MAX_EXTENSION = 5_000_000; // meters line 1 is extended past each end when
  * Drawn by clicking anchor 1, anchor 2, then the side and distance of line 2. Editing: drag an
  * end marker (white square) to move that end (the other stays put, the distance is kept), or
  * the white square at the middle of line 2 to change the distance (dragging it across line 1
- * moves line 2 to the other side). A translate marker at the middle of line 1. One height for
+ * moves line 2 to the other side; with shift it rotates the shape about its center instead). A translate marker at the middle of line 1. One height for
  * the whole shape at altitude.
  */
 export default class ParallelLines extends Shape {
@@ -165,6 +165,34 @@ export default class ParallelLines extends Shape {
     const along = best.t < 1 ? bearing(best.foot, best.b, arcType) : arrivalBearing(best.a, best.b, arcType);
     const side = Math.sin(bearing(best.foot, position, arcType) - along);
     return side < 0 ? -meters : meters;
+  }
+
+  /** The center of the shape: midway between the middles of line 1 and line 2. */
+  center() {
+    const { mid, along } = this.#middle();
+    return destination(mid, along + Math.sign(this.offset) * HALF_PI, Math.abs(this.offset) / 2, this.arcType);
+  }
+
+  // Shift+drag on the line 2 marker: rotates the shape about its center so that the marker
+  // points at the cursor. Length and offset are kept.
+  #rotateToward(position) {
+    if (!(this.length > 0) || this.offset === 0) {
+      return;
+    }
+    const arcType = this.arcType;
+    const center = this.center();
+    const half = Math.abs(this.offset) / 2;
+    const side = Math.sign(this.offset);
+    // Line 1's middle goes opposite the cursor; line 1 runs across that direction.
+    const toCursor = bearing(center, position, arcType);
+    const mid = destination(center, toCursor + Math.PI, half, arcType);
+    const outward = arrivalBearing(center, mid, arcType) + Math.PI; // at mid, toward line 2
+    const along = outward - side * HALF_PI;
+    const length = this.length;
+    this.setAnchors(
+      destination(mid, along + Math.PI, length / 2, arcType),
+      destination(mid, along, length / 2, arcType),
+    );
   }
 
   isValid() {
@@ -310,14 +338,18 @@ export default class ParallelLines extends Shape {
       const position = this.line2Middle();
       // axis: the direction the distance changes in, at the marker (for the resize icon).
       const axis = this.offset !== 0 ? arrivalBearing(mid, position, this.arcType) : bearingOut;
-      specs.push({ key: "offset", position, role: "offset", axis });
+      // shiftVertical: false - with shift this marker rotates the shape instead of changing
+      // its height, and shows the rotate icon then (shiftRole).
+      specs.push({ key: "offset", position, role: "offset", axis, shiftVertical: false, shiftRole: "rotate" });
       specs.push(...this.translateSpec(mid));
     }
     return specs;
   }
 
-  onMarkerDrag(spec, position) {
-    if (spec.role === "anchor") {
+  onMarkerDrag(spec, position, { shift = false } = {}) {
+    if (spec.role === "offset" && shift) {
+      this.#rotateToward(position);
+    } else if (spec.role === "anchor") {
       if (spec.index === 0) {
         this.setAnchor1(position);
       } else {

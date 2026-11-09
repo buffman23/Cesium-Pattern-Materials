@@ -119,7 +119,8 @@ editor.selected?.toJSON();                                 // Shape.fromJSON(jso
   `offset` (meters; positive to the right of anchor 1 → anchor 2, negative to the left)
   places line 2. Line 2 keeps that distance all along, so on a long line it is a curve, not a
   straight geodesic. Drawn with three clicks: anchor 1, anchor 2, then line 2. Drag an end to
-  move it, or the square at the middle of line 2 to change the distance or the side.
+  move it, or the square at the middle of line 2 to change the distance or the side;
+  shift+drag that square to rotate the shape about its center.
 - **Modes:** a shape starts in DRAW_MODE. When it is finished it enters EDIT_MODE, where
   markers can be dragged. Clicking empty globe or pressing Esc makes it IDLE, and clicking it
   edits it again.
