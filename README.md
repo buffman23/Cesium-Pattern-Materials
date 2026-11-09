@@ -108,8 +108,8 @@ editor.selected?.toJSON();                                 // Shape.fromJSON(jso
   each leg at the lower floor and higher ceiling of its two cylinders. Clamped to the ground
   it shows only the footprint. Markers per vertex: the vertex (white), a radius square
   (yellow), and at altitude top and bottom squares (orange) dragged up or down. With shift, a
-  radius square scales every radius and an altitude square every max or min altitude, by the
-  same factor. It needs the `polygon-clipping` package and must fit within a hemisphere.
+  radius square scales every radius by the same factor, and an altitude square moves every
+  max or min altitude by the same number of meters. It needs the `polygon-clipping` package and must fit within a hemisphere.
 - **Box:** a rotatable box with two forms on one geometry. The anchor form takes `anchor1`,
   `anchor2` (the middles of the short ends) and `width`. The center form takes `center`,
   `length`, `width` and `heading`. Each form has its own drawing steps and fields, and
@@ -159,7 +159,8 @@ editor.selected?.toJSON();                                 // Shape.fromJSON(jso
   fall back to a solid color.
 - **Subclassing:** implement `outlineLines()` (any number of lines, each with a material
   key), `createFillGeometry()`, `markerSpecs()` and `onMarkerDrag()`. The class comments in
-  `Shape.js` and `VertexShape.js` list every hook.
+  `Shape.js` and `VertexShape.js` list every hook. For how the library works inside and a
+  step-by-step guide to adding a shape, see [docs/shapes/SHAPE_LIBRARY.md](docs/shapes/SHAPE_LIBRARY.md).
 
 ## Project layout
 
