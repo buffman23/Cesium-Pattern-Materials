@@ -9,9 +9,9 @@ import { arrivalBearing, bearing, clockwiseSweep, distance, sampleArc } from "./
  * The radial edges and the arc's distance follow the shape's arcType. Drawn by clicking the
  * center, then the start of the arc, then its end.
  *
- * Edit markers: the center (moves the sector; shift+drag changes the height at altitude), the
- * arc's start and end (bearing and radius) and its middle (radius; shift+drag rotates the
- * sector about the center instead). One height for the whole sector at altitude.
+ * Edit markers: the center (moves the sector), the arc's start and end (bearing and radius)
+ * and its middle (radius; shift+drag rotates the sector about the center instead). Shift+drag
+ * on the center, start or end marker changes the height at altitude. One height for the whole sector at altitude.
  */
 export default class Sector extends Shape {
   static type = "Sector";
@@ -239,11 +239,12 @@ export default class Sector extends Shape {
       ? this.translateSpec(center)
       : [{ key: "center", position: center, role: "center" }];
     if (this.radius > 0) {
-      // shiftVertical: false - shift doesn't make these height drags. The radius marker
-      // rotates with shift instead, and shows the rotate icon then (shiftRole).
+      // Shift+drag on start / end changes the shape's height (the default). The radius marker
+      // rotates with shift instead (shiftVertical: false), and shows the rotate icon then
+      // (shiftRole).
       specs.push(
-        { key: "start", position: this.#pointAt(this.startBearing), role: "start", shiftVertical: false },
-        { key: "end", position: this.#pointAt(this.startBearing + this.sweep), role: "end", shiftVertical: false },
+        { key: "start", position: this.#pointAt(this.startBearing), role: "start" },
+        { key: "end", position: this.#pointAt(this.startBearing + this.sweep), role: "end" },
         {
           key: "mid",
           position: this.#pointAt(this.startBearing + this.sweep / 2),
