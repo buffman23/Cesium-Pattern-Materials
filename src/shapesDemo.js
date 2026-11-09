@@ -16,6 +16,7 @@ import {
   Rectangle,
   Sector,
   Box,
+  ParallelLines,
   Shape,
   ShapeEditor,
   colorMaterial,
@@ -57,7 +58,7 @@ const viewer = new Viewer("cesiumContainer", {
 viewer.scene.globe.depthTestAgainstTerrain = false;
 viewer.camera.setView({ destination: Cartesian3.fromDegrees(-104.99, 39.74, 400000) });
 
-const SHAPES = { Polyline, Polygon, Corridor, Circle, Rectangle, Sector, Box };
+const SHAPES = { Polyline, Polygon, Corridor, Circle, Rectangle, Sector, Box, ParallelLines };
 
 // --- Materials, by select value (shared specs, so changing one shape doesn't affect others) --
 const COLORS = {

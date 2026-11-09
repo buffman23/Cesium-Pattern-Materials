@@ -85,7 +85,8 @@ assumed to be the ellipsoid (no terrain); stamps taller than the line width are 
 
 A separate demo at **`/shapes.html`** (`src/shapesDemo.js`) shows a reusable drawing and
 editing library. It has a `Shape` base class and these subclasses: `Polyline`, `Polygon`,
-`Corridor` (all three extend `VertexShape`), `Circle`, `Rectangle`, `Sector` and `Box`.
+`Corridor` (all three extend `VertexShape`), `Circle`, `Rectangle`, `Sector`, `Box` and
+`ParallelLines`.
 
 ```js
 import { ShapeEditor, Polygon, Circle, patternFillMaterial } from "./src/shapes/index.js";
@@ -114,6 +115,11 @@ editor.selected?.toJSON();                                 // Shape.fromJSON(jso
   `length`, `width` and `heading`. Each form has its own drawing steps and fields, and
   `setForm` switches between them without moving the box. Editing is the same in both: drag
   an end to move it (the other stays put), or shift+drag it to rotate about the center.
+- **ParallelLines:** two parallel lines, no fill. `anchor1` and `anchor2` set line 1, and
+  `offset` (meters; positive to the right of anchor 1 → anchor 2, negative to the left)
+  places line 2. Line 2 keeps that distance all along, so on a long line it is a curve, not a
+  straight geodesic. Drawn with three clicks: anchor 1, anchor 2, then line 2. Drag an end to
+  move it, or the square at the middle of line 2 to change the distance or the side.
 - **Modes:** a shape starts in DRAW_MODE. When it is finished it enters EDIT_MODE, where
   markers can be dragged. Clicking empty globe or pressing Esc makes it IDLE, and clicking it
   edits it again.
@@ -124,6 +130,7 @@ editor.selected?.toJSON();                                 // Shape.fromJSON(jso
   - Point handles are white squares.
   - Circle and Corridor resize handles are cyan double arrows that point the way they resize.
   - Box handles: yellow squares for the width, white squares for the ends.
+  - ParallelLines handles are all white squares.
   - Sector handles are all white squares.
   - The `roleStyles` marker option changes any of these per role, per shape class
     (`static defaultMarkerOptions`) or per shape.

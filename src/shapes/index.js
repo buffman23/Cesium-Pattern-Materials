@@ -9,6 +9,7 @@ export { default as Circle } from "./Circle.js";
 export { default as Rectangle } from "./Rectangle.js";
 export { default as Sector } from "./Sector.js";
 export { default as Box, BoxForm } from "./Box.js";
+export { default as ParallelLines } from "./ParallelLines.js";
 export * from "./materials.js";
 export * as geodesy from "./geodesy.js";
 export {
