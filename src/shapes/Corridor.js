@@ -36,8 +36,9 @@ const AUTO_RADIUS_PIXELS = 40; // on-screen radius of the first cylinder when no
  *
  * Markers per vertex: the vertex (white; moves it, shift+drag raises the whole cylinder), a
  * yellow radius square on its circle and, at altitude, orange top and bottom squares dragged
- * up / down for the max and min altitude. With shift, a radius square scales every radius
- * and an altitude square every max (or min) altitude, by the same factor. New vertices copy
+ * up / down for the max and min altitude. With shift, a radius square scales every radius by
+ * the same factor, and an altitude square moves every max (or min) altitude by the same
+ * number of meters. New vertices copy
  * the previous vertex's radius and altitudes.
  */
 export default class Corridor extends VertexShape {
@@ -210,12 +211,29 @@ export default class Corridor extends VertexShape {
     this.#changeAltitudes(which, (h) => h + delta);
   }
 
+  // Shift+drag on an altitude marker: every max (or min) moves by the dragged marker's change
+  // since the drag (or shift) started. Values come from that start, so ones held at a limit
+  // (max at its min, min at 0 or its max) get their offset back when the drag reverses.
+  #shiftAltitudes(spec, height) {
+    const values = spec.which === "max" ? this.maxAltitudes : this.minAltitudes;
+    let snap = this._shiftAltitudes;
+    if (!snap || snap.key !== spec.key || snap.which !== spec.which || snap.base.length !== values.length) {
+      snap = this._shiftAltitudes = { key: spec.key, which: spec.which, start: values[spec.index], base: [...values] };
+    }
+    const delta = height - snap.start;
+    this.#changeAltitudes(spec.which, (_, j) => snap.base[j] + delta);
+  }
+
+  onMarkerDragEnd() {
+    this._shiftAltitudes = undefined;
+  }
+
   #changeAltitudes(which, change) {
     for (let i = 0; i < this.positions.length; i++) {
       if (which === "max") {
-        this.maxAltitudes[i] = Math.max(change(this.maxAltitudes[i]), this.minAltitudes[i]);
+        this.maxAltitudes[i] = Math.max(change(this.maxAltitudes[i], i), this.minAltitudes[i]);
       } else {
-        this.minAltitudes[i] = Math.min(Math.max(change(this.minAltitudes[i]), 0), this.maxAltitudes[i]);
+        this.minAltitudes[i] = Math.min(Math.max(change(this.minAltitudes[i], i), 0), this.maxAltitudes[i]);
       }
     }
     this.invalidate(Dirty.GEOMETRY);
@@ -442,22 +460,16 @@ export default class Corridor extends VertexShape {
 
   /**
    * Vertical drags: altitude markers set min / max (with shift: every min or every max, by
-   * the same factor); shift+drag on others raises cylinders.
+   * the same amount); shift+drag on others raises cylinders.
    */
   onMarkerHeight(spec, height, { shift = false } = {}) {
     if (spec.role === "altitude") {
       const i = spec.index;
       if (shift) {
-        const values = spec.which === "max" ? this.maxAltitudes : this.minAltitudes;
-        const current = values[i];
-        // From 0 there's no factor: move them all by the same amount instead.
-        if (current > 0) {
-          this.scaleAltitudes(spec.which, Math.max(height, 0) / current);
-        } else {
-          this.offsetAltitudes(spec.which, height - current);
-        }
+        this.#shiftAltitudes(spec, height);
         return;
       }
+      this._shiftAltitudes = undefined;
       if (spec.which === "max") {
         this.setVertexAltitudes(i, this.minAltitudes[i], Math.max(height, this.minAltitudes[i]));
       } else {

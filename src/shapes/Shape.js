@@ -76,7 +76,8 @@ let nextId = 1;
  *    onDrawFinishRequest("double" | "right"), drawHint(), cursorMessage()
  *  - isValid()
  *  - markerSpecs() -> [{ key, position, role, deletable?, label?, ... }]
- *  - onMarkerDrag(spec, position), onMarkerHeight(spec, height), deleteMarker(spec)
+ *  - onMarkerDrag(spec, position), onMarkerHeight(spec, height), onMarkerDragEnd(key),
+ *    deleteMarker(spec)
  *  - createFillGeometry() -> geometry (description or created) | array of them | undefined
  *  - outlineLines() -> [{ positions, loop?, key?, width?, arcType? }]
  *  - stateToJSON() and static stateFromJSON(json) -> constructor options
@@ -524,6 +525,9 @@ export default class Shape {
   }
 
   onMarkerDrag() {}
+
+  /** Called once when a marker drag (plain or vertical) ends. */
+  onMarkerDragEnd() {}
 
   /** Shift+drag: default changes the whole shape's height. */
   onMarkerHeight(spec, height) {

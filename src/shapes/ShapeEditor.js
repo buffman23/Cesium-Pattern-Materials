@@ -575,6 +575,7 @@ export default class ShapeEditor {
     }
     this._dragging = undefined;
     this.scene.screenSpaceCameraController.enableInputs = true;
+    drag.shape.onMarkerDragEnd?.(drag.key);
     drag.shape.markers?.setActive(undefined);
     drag.shape._setInteractive(false);
     this._updateCursorMessage();
